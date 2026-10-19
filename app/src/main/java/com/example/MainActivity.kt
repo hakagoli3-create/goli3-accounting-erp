@@ -264,21 +264,35 @@ sealed class Screen(
     )
 
     companion object {
-        val ALL_SCREENS: List<Screen> = listOf(
-            Dashboard,
-            Pos,
-            Invoices,
-            Inventory,
-            Treasury,
-            Accounting,
-            Incomes,
-            Expenses,
-            Crm,
-            Settings
-        )
+        val ALL_SCREENS: List<Screen>
+            get() = listOf(
+                Dashboard,
+                Pos,
+                Invoices,
+                Inventory,
+                Treasury,
+                Accounting,
+                Incomes,
+                Expenses,
+                Crm,
+                Settings
+            )
 
         fun findByRoute(route: String?): Screen {
-            return ALL_SCREENS.firstOrNull { it.route.equals(route, ignoreCase = true) } ?: Dashboard
+            val r = route?.lowercase()?.trim() ?: return Dashboard
+            return when (r) {
+                "dashboard" -> Dashboard
+                "pos" -> Pos
+                "invoices" -> Invoices
+                "inventory" -> Inventory
+                "treasury" -> Treasury
+                "accounting" -> Accounting
+                "incomes" -> Incomes
+                "expenses" -> Expenses
+                "crm" -> Crm
+                "settings" -> Settings
+                else -> Dashboard
+            }
         }
     }
 }
@@ -408,12 +422,20 @@ fun AuthenticatedAppContent(
 
     fun navigateToScreen(targetRoute: String) {
         if (currentRoute == targetRoute) return
-        navController.navigate(targetRoute) {
-            popUpTo(navController.graph.findStartDestination().id) {
-                saveState = true
+        try {
+            navController.navigate(targetRoute) {
+                popUpTo(navController.graph.findStartDestination().id) {
+                    saveState = true
+                }
+                launchSingleTop = true
+                restoreState = true
             }
-            launchSingleTop = true
-            restoreState = true
+        } catch (_: Exception) {
+            try {
+                navController.navigate(targetRoute) {
+                    launchSingleTop = true
+                }
+            } catch (_: Exception) {}
         }
     }
 

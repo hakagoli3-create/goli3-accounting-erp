@@ -12,16 +12,35 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-@org.junit.Ignore("Disabled in CI builds")
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class ExampleRobolectricTest {
 
     @Test
-    fun `read string from context`() {
+    fun `test Screen findByRoute resolves all routes without NullPointerException`() {
+        val all = Screen.ALL_SCREENS
+        assertEquals(10, all.size)
+        all.forEach { screen ->
+            org.junit.Assert.assertNotNull("Screen should not be null", screen)
+            org.junit.Assert.assertNotNull("Route should not be null", screen.route)
+            val found = Screen.findByRoute(screen.route)
+            assertEquals(screen, found)
+        }
+        // Test fallback for null or unknown route
+        assertEquals(Screen.Dashboard, Screen.findByRoute(null))
+        assertEquals(Screen.Dashboard, Screen.findByRoute(""))
+        assertEquals(Screen.Dashboard, Screen.findByRoute("unknown_route"))
+    }
+
+    @Test
+    fun `test launch MainActivity when logged in`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val appName = context.getString(R.string.app_name)
-        assertEquals("مدیریت حسابداری گلی", appName)
+        val securityManager = AppSecurityAndSettingsManager.getInstance(context)
+        securityManager.login("admin", "1234")
+
+        val controller = org.robolectric.Robolectric.buildActivity(MainActivity::class.java)
+        val activity = controller.setup().get()
+        org.junit.Assert.assertNotNull(activity)
     }
 
     @Test
@@ -130,5 +149,28 @@ class ExampleRobolectricTest {
         // Cleanup
         db.userDao().deleteUserById(fetchedSeller.id)
         org.junit.Assert.assertNull(db.userDao().getUserByUsername("seller_test"))
+    }
+
+    @Test
+    fun `test cold start to login screen and transition to dashboard on login`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val securityManager = AppSecurityAndSettingsManager.getInstance(context)
+        securityManager.logout() // Start in unauthenticated state
+        assertFalse(securityManager.isLoggedIn.value)
+
+        val controller = org.robolectric.Robolectric.buildActivity(MainActivity::class.java)
+        val activity = controller.setup().get()
+        org.junit.Assert.assertNotNull(activity)
+
+        // Now perform successful login
+        val success = securityManager.login("admin", "1234")
+        assertTrue(success)
+        assertTrue(securityManager.isLoggedIn.value)
+        assertEquals(UserRole.ADMIN, securityManager.currentRole.value)
+
+        // Verify finding routes for dashboard and other screens after login
+        val currentScreen = Screen.findByRoute("dashboard")
+        assertEquals(Screen.Dashboard, currentScreen)
+        assertEquals(10, Screen.ALL_SCREENS.size)
     }
 }

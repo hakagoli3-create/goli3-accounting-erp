@@ -67,7 +67,7 @@ android {
   }
   testOptions {
     unitTests {
-      isIncludeAndroidResources = false
+      isIncludeAndroidResources = true
       isReturnDefaultValues = true
       all {
         it.ignoreFailures = true
