@@ -1,0 +1,62 @@
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Prepare Keystore, Environment and Google Services
+        run: |
+          chmod +x ./gradlew
+          
+          if [ ! -f debug.keystore ]; then
+            if [ -f debug.keystore.base64 ]; then
+              base64 -d debug.keystore.base64 > debug.keystore
+            else
+              keytool -genkey -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+            fi
+          fi
+
+          echo 'GEMINI_API_KEY="dummy_key"' > .env.example
+          echo 'GEMINI_API_KEY="dummy_key"' > .env
+
+          if [ ! -f app/google-services.json ]; then
+            echo '{"project_info":{"project_number":"140084369102","project_id":"goli-accounting-erp","storage_bucket":"goli-accounting-erp.appspot.com"},"client":[{"client_info":{"mobilesdk_app_id":"1:140084369102:android:65a4bc837d9210ef821bc1","android_client_info":{"package_name":"com.aistudio.goliaccounting.kxrvzt"}},"oauth_client":[],"api_key":[{"current_key":"AIzaSyDummyKeyForGoliAccountingOnlineSync123"}],"services":{"appinvite_service":{"other_platform_oauth_client":[]}}}],"configuration_version":"1"}' > app/google-services.json
+          fi
+
+      - name: Build Debug APK
+        env:
+          JAVA_TOOL_OPTIONS: "-Djava.awt.headless=true"
+        run: ./gradlew assembleDebug -PversionCode=${{ github.run_number }} -x test --no-daemon
+
+      - name: Create Release and Upload APK
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "app/build/outputs/apk/debug/app-debug.apk"
+          tag: "v1.0.${{ github.run_number }}"
+          name: "Goli Accounting App v1.0.${{ github.run_number }}"
+          body: "دانلود مستقیم فایل APK برنامه حسابداری گلی"
+          token: ${{ secrets.GITHUB_TOKEN }}
+          allowUpdates: true
