@@ -5,6 +5,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.example.data.model.InventoryMovementEntity
 import com.example.data.model.ProductEntity
@@ -130,4 +131,39 @@ interface InventoryDao {
 
     @Query("DELETE FROM inventory_movements WHERE productId = :productId")
     suspend fun deleteMovementsForProduct(productId: Long)
+
+    @Transaction
+    suspend fun recordMovementAndAdjustStock(movement: InventoryMovementEntity): Long {
+        val movementId = insertMovement(movement)
+        adjustStock(movement.productId, movement.quantitySecondary)
+        return movementId
+    }
+
+    @Transaction
+    suspend fun transferStockBetweenWarehousesTransaction(
+        outMovement: InventoryMovementEntity,
+        inMovement: InventoryMovementEntity
+    ) {
+        insertMovement(outMovement)
+        insertMovement(inMovement)
+    }
+
+    @Transaction
+    suspend fun deleteMovementAndAdjustStock(movementId: Long, productId: Long, reverseDelta: Double): Int {
+        adjustStock(productId, reverseDelta)
+        return deleteMovementById(movementId)
+    }
+
+    @Transaction
+    suspend fun clearProductMovementsAndResetStock(productId: Long) {
+        deleteMovementsForProduct(productId)
+        setProductStock(productId, 0.0)
+    }
+
+    @Transaction
+    suspend fun forceDeleteProductAndMovementsTransaction(productId: Long, product: ProductEntity) {
+        deleteMovementsForProduct(productId)
+        deleteInvoiceItemsForProduct(productId)
+        deleteProduct(product)
+    }
 }

@@ -23,7 +23,7 @@ class AppViewModelFactory(
     }
 
     val inventoryRepository: InventoryRepository by lazy {
-        InventoryRepository(database.inventoryDao())
+        InventoryRepository(database.inventoryDao(), appDatabase = database)
     }
 
     val partyRepository: PartyRepository by lazy {
@@ -31,14 +31,15 @@ class AppViewModelFactory(
     }
 
     val treasuryRepository: TreasuryRepository by lazy {
-        TreasuryRepository(database.treasuryDao())
+        TreasuryRepository(database.treasuryDao(), appDatabase = database)
     }
 
     val expenseAndIncomeRepository: com.example.data.repository.ExpenseAndIncomeRepository by lazy {
         com.example.data.repository.ExpenseAndIncomeRepository(
             expenseAndIncomeDao = database.expenseAndIncomeDao(),
             treasuryDao = database.treasuryDao(),
-            accountingDao = database.accountingDao()
+            accountingDao = database.accountingDao(),
+            appDatabase = database
         )
     }
 
@@ -48,7 +49,8 @@ class AppViewModelFactory(
             inventoryDao = database.inventoryDao(),
             partyDao = database.partyDao(),
             treasuryDao = database.treasuryDao(),
-            accountingDao = database.accountingDao()
+            accountingDao = database.accountingDao(),
+            appDatabase = database
         )
     }
 

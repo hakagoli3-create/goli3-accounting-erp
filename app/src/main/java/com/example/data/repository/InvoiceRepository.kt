@@ -12,6 +12,8 @@ import com.example.data.model.InvoiceWithItems
 import com.example.data.model.JournalEntryEntity
 import com.example.data.model.JournalItemEntity
 import com.example.util.JalaliDate
+import androidx.room.withTransaction
+import com.example.data.database.AppDatabase
 import kotlinx.coroutines.flow.Flow
 
 class InvoiceRepository(
@@ -19,8 +21,17 @@ class InvoiceRepository(
     private val inventoryDao: InventoryDao,
     private val partyDao: PartyDao,
     private val treasuryDao: TreasuryDao,
-    private val accountingDao: AccountingDao
+    private val accountingDao: AccountingDao,
+    private val appDatabase: AppDatabase? = null
 ) {
+
+    private suspend fun <T> runInTransaction(block: suspend () -> T): T {
+        return if (appDatabase != null) {
+            appDatabase.withTransaction { block() }
+        } else {
+            block()
+        }
+    }
 
     val allInvoicesWithItems: Flow<List<InvoiceWithItems>> = invoiceDao.getAllInvoicesWithItems()
     val totalSalesSum: Flow<Long?> = invoiceDao.getTotalSalesSum()
@@ -34,20 +45,21 @@ class InvoiceRepository(
 
     /**
      * ثبت کامل فاکتور به همراه آپدیت انبارداری، خزانه‌داری، مانده حساب مشتری، و صدور سند اتوماتیک دوبل حسابداری
+     * با تضمین اتمیک بودن کلیه عملیات چندجدولی در یک تراکنش واحد
      */
     suspend fun createInvoice(
         invoice: InvoiceEntity,
         items: List<InvoiceItemEntity>
-    ): Long {
+    ): Long = runInTransaction {
         val invoiceId = invoiceDao.createInvoiceWithItems(invoice, items)
 
         // اگر پیش‌فاکتور (PROFORMA) باشد، از انبار کسر نمی‌شود و سند قطعی حسابداری صادر نمی‌گردد
         if (invoice.status == "PROFORMA") {
-            return invoiceId
+            return@runInTransaction invoiceId
         }
 
         applyInvoiceEffects(invoice.copy(id = invoiceId), items)
-        return invoiceId
+        invoiceId
     }
 
     /**
@@ -462,15 +474,15 @@ class InvoiceRepository(
     }
 
     /**
-     * ویرایش کامل فاکتور موجود: برگشت اثرات قبلی و اعمال تغییرات جدید
+     * ویرایش کامل فاکتور موجود: برگشت اثرات قبلی و اعمال تغییرات جدید در یک تراکنش واحد اتمیک
      */
     suspend fun updateExistingInvoice(
         invoiceId: Long,
         updatedInvoice: InvoiceEntity,
         newItems: List<InvoiceItemEntity>
-    ): Boolean {
-        return try {
-            val oldInvoiceWithItems = invoiceDao.getInvoiceWithItemsById(invoiceId) ?: return false
+    ): Boolean = runInTransaction {
+        try {
+            val oldInvoiceWithItems = invoiceDao.getInvoiceWithItemsById(invoiceId) ?: return@runInTransaction false
             val oldInvoice = oldInvoiceWithItems.invoice
 
             // اگر فاکتور قبلاً قطعی بود، اثرات گذشته را برگشت می‌زنیم
@@ -492,18 +504,18 @@ class InvoiceRepository(
             true
         } catch (e: Exception) {
             android.util.Log.e("InvoiceRepository", "Error updating existing invoice", e)
-            false
+            throw e // Throw so transaction rolls back completely on any failure
         }
     }
 
     /**
-     * تبدیل سریع پیش‌فاکتور به فاکتور فروش قطعی
+     * تبدیل سریع پیش‌فاکتور به فاکتور فروش قطعی در یک تراکنش اتمیک
      */
-    suspend fun convertProformaToFinal(invoiceId: Long): Boolean {
-        return try {
-            val invoiceWithItems = invoiceDao.getInvoiceWithItemsById(invoiceId) ?: return false
+    suspend fun convertProformaToFinal(invoiceId: Long): Boolean = runInTransaction {
+        try {
+            val invoiceWithItems = invoiceDao.getInvoiceWithItemsById(invoiceId) ?: return@runInTransaction false
             val invoice = invoiceWithItems.invoice
-            if (invoice.status != "PROFORMA") return false
+            if (invoice.status != "PROFORMA") return@runInTransaction false
 
             val updatedInvoice = invoice.copy(status = "FINAL")
             invoiceDao.updateInvoice(updatedInvoice)
@@ -511,18 +523,18 @@ class InvoiceRepository(
             true
         } catch (e: Exception) {
             android.util.Log.e("InvoiceRepository", "Error converting proforma to final", e)
-            false
+            throw e
         }
     }
 
     /**
-     * ابطال تمامی اثرات فاکتور و علامت‌گذاری به عنوان باطل شده (VOID)
+     * ابطال تمامی اثرات فاکتور و علامت‌گذاری به عنوان باطل شده (VOID) در یک تراکنش اتمیک
      */
-    suspend fun voidInvoice(invoiceId: Long): Boolean {
-        return try {
-            val invoiceWithItems = invoiceDao.getInvoiceWithItemsById(invoiceId) ?: return false
+    suspend fun voidInvoice(invoiceId: Long): Boolean = runInTransaction {
+        try {
+            val invoiceWithItems = invoiceDao.getInvoiceWithItemsById(invoiceId) ?: return@runInTransaction false
             val invoice = invoiceWithItems.invoice
-            if (invoice.status == "VOID") return false
+            if (invoice.status == "VOID") return@runInTransaction false
 
             if (invoice.status == "FINAL") {
                 rollbackInvoiceEffects(invoice, invoiceWithItems.items)
@@ -532,13 +544,13 @@ class InvoiceRepository(
             true
         } catch (e: Exception) {
             android.util.Log.e("InvoiceRepository", "Error voiding invoice", e)
-            false
+            throw e
         }
     }
 
-    suspend fun deleteInvoice(invoiceId: Long): Boolean {
-        return try {
-            val invoiceWithItems = invoiceDao.getInvoiceWithItemsById(invoiceId) ?: return false
+    suspend fun deleteInvoice(invoiceId: Long): Boolean = runInTransaction {
+        try {
+            val invoiceWithItems = invoiceDao.getInvoiceWithItemsById(invoiceId) ?: return@runInTransaction false
             val invoice = invoiceWithItems.invoice
 
             // ۱. اگر فاکتور قطعی است، ابتدا اثرات انبار و مالی آن معکوس شوند
@@ -575,7 +587,7 @@ class InvoiceRepository(
             rowsDeleted > 0
         } catch (e: Exception) {
             android.util.Log.e("InvoiceRepository", "Fatal error in deleteInvoice", e)
-            false
+            throw e
         }
     }
 

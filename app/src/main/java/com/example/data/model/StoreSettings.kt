@@ -173,8 +173,16 @@ class AppSecurityAndSettingsManager(context: Context) {
                 if (!user.isActive) {
                     return Pair(false, "حساب کاربری «$u» توسط مدیر سیستم غیرفعال شده است.")
                 }
-                if (user.passwordHash != p) {
+                val passwordMatches = com.example.util.DatabaseSecurityManager.verifyPassword(p, user.passwordHash)
+                if (!passwordMatches) {
                     return Pair(false, "رمز عبور وارد شده برای کاربر «$u» نادرست است.")
+                }
+                // در صورت یکسان بودن با پسورد خام قدیمی، ارتقای اتوماتیک به هش امن دارای نمک صورت می‌پذیرد
+                if (user.passwordHash == p) {
+                    try {
+                        val secureHash = com.example.util.DatabaseSecurityManager.hashPassword(p)
+                        db.userDao().updatePassword(user.id, secureHash)
+                    } catch (_: Exception) {}
                 }
                 val role = UserRole.fromString(user.role)
                 setLoggedInUser(user.username, user.fullName, role)

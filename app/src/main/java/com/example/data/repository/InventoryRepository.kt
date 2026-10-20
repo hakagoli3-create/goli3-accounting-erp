@@ -4,9 +4,13 @@ import com.example.data.dao.InventoryDao
 import com.example.data.model.InventoryMovementEntity
 import com.example.data.model.ProductEntity
 import com.example.data.model.WarehouseEntity
+import com.example.data.database.AppDatabase
 import kotlinx.coroutines.flow.Flow
 
-class InventoryRepository(private val dao: InventoryDao) {
+class InventoryRepository(
+    private val dao: InventoryDao,
+    private val appDatabase: AppDatabase? = null
+) {
 
     val allWarehouses: Flow<List<WarehouseEntity>> = dao.getAllWarehouses()
     val allProducts: Flow<List<ProductEntity>> = dao.getAllProducts()
@@ -71,13 +75,11 @@ class InventoryRepository(private val dao: InventoryDao) {
     }
 
     /**
-     * رفع بن‌بست حذف کالا: پاکسازی قطعی تمام تراکنش‌های گردش و اقلام فاکتور وابسته و حذف کالا
+     * رفع بن‌بست حذف کالا: پاکسازی قطعی تمام تراکنش‌های گردش و اقلام فاکتور وابسته و حذف کالا در یک تراکنش اتمیک
      */
     suspend fun forceDeleteProductAndMovements(product: ProductEntity): Pair<Boolean, String> {
         return try {
-            dao.deleteMovementsForProduct(product.id)
-            dao.deleteInvoiceItemsForProduct(product.id)
-            dao.deleteProduct(product)
+            dao.forceDeleteProductAndMovementsTransaction(product.id, product)
             Pair(true, "کلیه گردش‌های کالا پاکسازی شده و کالای «${product.name}» با موفقیت حذف گردید.")
         } catch (e: Exception) {
             Pair(false, "خطا در پاکسازی و حذف کالا: ${e.localizedMessage}")
@@ -85,16 +87,15 @@ class InventoryRepository(private val dao: InventoryDao) {
     }
 
     /**
-     * حذف مستقیم یک ردیف گردش از کاردکس با بازگردانی متناسب موجودی لحظه‌ای کالا
+     * حذف مستقیم یک ردیف گردش از کاردکس با بازگردانی متناسب موجودی لحظه‌ای کالا در یک تراکنش اتمیک
      */
     suspend fun deleteSingleMovement(movementId: Long): Pair<Boolean, String> {
         return try {
             val mov = dao.getMovementById(movementId)
                 ?: return Pair(false, "گردش مورد نظر در کاردکس یافت نشد.")
 
-            // کسر اثر این تراکنش از موجودی لحظه‌ای تا فرمول موجودی دقیق باقی بماند
-            dao.adjustStock(mov.productId, -mov.quantitySecondary)
-            dao.deleteMovementById(movementId)
+            // کسر اثر این تراکنش از موجودی لحظه‌ای به صورت همزمان با حذف در یک تراکنش
+            dao.deleteMovementAndAdjustStock(movementId, mov.productId, -mov.quantitySecondary)
             Pair(true, "گردش «${mov.referenceNumber}» با موفقیت از کاردکس حذف شد.")
         } catch (e: Exception) {
             Pair(false, "خطا در حذف گردش: ${e.localizedMessage}")
@@ -102,12 +103,11 @@ class InventoryRepository(private val dao: InventoryDao) {
     }
 
     /**
-     * پاکسازی کامل تمام گردش‌های کالا و صفر کردن موجودی
+     * پاکسازی کامل تمام گردش‌های کالا و صفر کردن موجودی در یک تراکنش اتمیک
      */
     suspend fun clearAllMovementsForProduct(productId: Long): Pair<Boolean, String> {
         return try {
-            dao.deleteMovementsForProduct(productId)
-            dao.setProductStock(productId, 0.0)
+            dao.clearProductMovementsAndResetStock(productId)
             Pair(true, "تمامی گردش‌های این کالا پاکسازی گردید و موجودی آن صفر شد.")
         } catch (e: Exception) {
             Pair(false, "خطا در پاکسازی کاردکس: ${e.localizedMessage}")
@@ -191,8 +191,6 @@ class InventoryRepository(private val dao: InventoryDao) {
             unitPrice = product.buyPrice,
             description = "حواله خروج انتقال به انبار ${toWarehouse.name} ($description)"
         )
-        dao.insertMovement(outMovement)
-
         // ثبت سند ورود به انبار مقصد
         val inMovement = InventoryMovementEntity(
             productId = productId,
@@ -204,7 +202,9 @@ class InventoryRepository(private val dao: InventoryDao) {
             unitPrice = product.buyPrice,
             description = "حواله ورود انتقال از انبار ${fromWarehouse.name} ($description)"
         )
-        dao.insertMovement(inMovement)
+
+        // ثبت همزمان و اتمیک سند خروج از انبار مبدأ و سند ورود به انبار مقصد در یک تراکنش
+        dao.transferStockBetweenWarehousesTransaction(outMovement, inMovement)
 
         return Pair(true, "انتقال با موفقیت با شماره حواله $referenceNumber ثبت گردید.")
     }
@@ -213,8 +213,7 @@ class InventoryRepository(private val dao: InventoryDao) {
         dao.getCardexForProduct(productId)
 
     suspend fun recordMovement(movement: InventoryMovementEntity) {
-        dao.insertMovement(movement)
-        dao.adjustStock(movement.productId, movement.quantitySecondary)
+        dao.recordMovementAndAdjustStock(movement)
     }
 
     suspend fun performStockAdjustment(

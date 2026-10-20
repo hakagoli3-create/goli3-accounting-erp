@@ -823,7 +823,7 @@ private fun AddUserDialog(
                         } else {
                             val newUser = UserEntity(
                                 username = trimmedUser,
-                                passwordHash = trimmedPass,
+                                passwordHash = com.example.util.DatabaseSecurityManager.hashPassword(trimmedPass),
                                 fullName = trimmedName,
                                 role = selectedRole.name,
                                 mobile = mobile.trim(),
@@ -923,7 +923,8 @@ private fun ChangePasswordDialog(
                     }
                     isSubmitting = true
                     scope.launch {
-                        db.userDao().updatePassword(user.id, p)
+                        val secureHash = com.example.util.DatabaseSecurityManager.hashPassword(p)
+                        db.userDao().updatePassword(user.id, secureHash)
                         isSubmitting = false
                         onPasswordChanged()
                     }

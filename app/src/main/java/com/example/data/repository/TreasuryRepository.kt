@@ -5,9 +5,13 @@ import com.example.data.model.BankAccountEntity
 import com.example.data.model.CashDeskEntity
 import com.example.data.model.ChequeEntity
 import com.example.util.JalaliDate
+import com.example.data.database.AppDatabase
 import kotlinx.coroutines.flow.Flow
 
-class TreasuryRepository(private val dao: TreasuryDao) {
+class TreasuryRepository(
+    private val dao: TreasuryDao,
+    private val appDatabase: AppDatabase? = null
+) {
 
     val allCashDesks: Flow<List<CashDeskEntity>> = dao.getAllCashDesks()
     val allBankAccounts: Flow<List<BankAccountEntity>> = dao.getAllBankAccounts()
@@ -41,12 +45,19 @@ class TreasuryRepository(private val dao: TreasuryDao) {
     suspend fun updateCheque(cheque: ChequeEntity) = dao.updateCheque(cheque)
     suspend fun deleteCheque(cheque: ChequeEntity) = dao.deleteCheque(cheque)
 
+    suspend fun transferBetweenAccounts(fromType: String, fromId: Long, toType: String, toId: Long, amount: Long) {
+        dao.transferBetweenAccounts(fromType, fromId, toType, toId, amount)
+    }
+
     // Multi-Currency Balances
     val allCurrencyBalances: Flow<List<com.example.data.model.TreasuryCurrencyBalanceEntity>> = dao.getAllCurrencyBalances()
 
     fun getBalancesForAccount(accountType: String, accountId: Long): Flow<List<com.example.data.model.TreasuryCurrencyBalanceEntity>> =
         dao.getBalancesForAccount(accountType, accountId)
 
+    /**
+     * به روزرسانی اتمیک موجودی ارزی و پایه صندوق یا حساب بانکی در یک تراکنش یکپارچه
+     */
     suspend fun adjustCurrencyBalance(
         accountType: String, // "CASH" or "BANK"
         accountId: Long,
@@ -56,25 +67,20 @@ class TreasuryRepository(private val dao: TreasuryDao) {
     ) {
         val existing = dao.getCurrencyBalance(accountType, accountId, currencyCode)
         val newBalance = (existing?.balance ?: 0.0) + delta
-        dao.insertOrUpdateCurrencyBalance(
-            com.example.data.model.TreasuryCurrencyBalanceEntity(
+        val deltaInBase = (delta * rateToBase).toLong()
+
+        dao.adjustCurrencyAndBaseBalance(
+            balanceEntity = com.example.data.model.TreasuryCurrencyBalanceEntity(
                 id = existing?.id ?: 0L,
                 accountType = accountType,
                 accountId = accountId,
                 currencyCode = currencyCode,
                 balance = newBalance
-            )
+            ),
+            accountType = accountType,
+            accountId = accountId,
+            deltaInBase = deltaInBase
         )
-
-        // Also adjust the base balance of the cash desk or bank account
-        val deltaInBase = (delta * rateToBase).toLong()
-        if (deltaInBase != 0L) {
-            if (accountType == "CASH") {
-                dao.updateCashBalance(accountId, deltaInBase)
-            } else {
-                dao.updateBankBalance(accountId, deltaInBase)
-            }
-        }
     }
 }
 

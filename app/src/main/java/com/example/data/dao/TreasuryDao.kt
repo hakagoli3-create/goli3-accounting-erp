@@ -5,6 +5,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.example.data.model.BankAccountEntity
 import com.example.data.model.CashDeskEntity
@@ -101,4 +102,36 @@ interface TreasuryDao {
 
     @Query("DELETE FROM treasury_currency_balances WHERE accountType = :accountType AND accountId = :accountId")
     suspend fun deleteBalancesForAccount(accountType: String, accountId: Long)
+
+    @Transaction
+    suspend fun adjustCurrencyAndBaseBalance(
+        balanceEntity: com.example.data.model.TreasuryCurrencyBalanceEntity,
+        accountType: String,
+        accountId: Long,
+        deltaInBase: Long
+    ) {
+        insertOrUpdateCurrencyBalance(balanceEntity)
+        if (deltaInBase != 0L) {
+            if (accountType == "CASH") {
+                updateCashBalance(accountId, deltaInBase)
+            } else {
+                updateBankBalance(accountId, deltaInBase)
+            }
+        }
+    }
+
+    @Transaction
+    suspend fun transferBetweenAccounts(
+        fromType: String,
+        fromId: Long,
+        toType: String,
+        toId: Long,
+        amount: Long
+    ) {
+        if (fromType == "CASH") updateCashBalance(fromId, -amount)
+        else updateBankBalance(fromId, -amount)
+
+        if (toType == "CASH") updateCashBalance(toId, amount)
+        else updateBankBalance(toId, amount)
+    }
 }

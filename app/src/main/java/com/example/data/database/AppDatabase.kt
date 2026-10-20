@@ -286,6 +286,18 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * بستن قطعی نمونه جاری Room جهت آماده‌سازی برای عملیات بازیابی (Restore) یا اعمال تنظیمات رمزنگاری
+         */
+        fun closeInstance() {
+            synchronized(this) {
+                try {
+                    INSTANCE?.close()
+                } catch (_: Exception) {}
+                INSTANCE = null
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(

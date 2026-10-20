@@ -9,13 +9,24 @@ import com.example.data.model.IncomeCategoryEntity
 import com.example.data.model.IncomeEntity
 import com.example.data.model.JournalEntryEntity
 import com.example.data.model.JournalItemEntity
+import androidx.room.withTransaction
+import com.example.data.database.AppDatabase
 import kotlinx.coroutines.flow.Flow
 
 class ExpenseAndIncomeRepository(
     private val expenseAndIncomeDao: ExpenseAndIncomeDao,
     private val treasuryDao: TreasuryDao,
-    private val accountingDao: AccountingDao
+    private val accountingDao: AccountingDao,
+    private val appDatabase: AppDatabase? = null
 ) {
+
+    private suspend fun <T> runInTransaction(block: suspend () -> T): T {
+        return if (appDatabase != null) {
+            appDatabase.withTransaction { block() }
+        } else {
+            block()
+        }
+    }
 
     // --- Expense Categories ---
     val allExpenseCategories: Flow<List<ExpenseCategoryEntity>> =
@@ -43,7 +54,7 @@ class ExpenseAndIncomeRepository(
     fun getExpensesBetweenDates(startDate: String, endDate: String): Flow<List<ExpenseEntity>> =
         expenseAndIncomeDao.getExpensesBetweenDates(startDate, endDate)
 
-    suspend fun createExpense(expense: ExpenseEntity): Long {
+    suspend fun createExpense(expense: ExpenseEntity): Long = runInTransaction {
         // 1. Create a double-entry accounting journal voucher
         val voucherId = try {
             val entry = JournalEntryEntity(
@@ -91,10 +102,10 @@ class ExpenseAndIncomeRepository(
         }
 
         // 3. Save Expense Entity
-        return expenseAndIncomeDao.insertExpense(expense.copy(voucherId = voucherId))
+        expenseAndIncomeDao.insertExpense(expense.copy(voucherId = voucherId))
     }
 
-    suspend fun updateExpense(oldExpense: ExpenseEntity, newExpense: ExpenseEntity) {
+    suspend fun updateExpense(oldExpense: ExpenseEntity, newExpense: ExpenseEntity) = runInTransaction {
         // Revert old treasury balance effect
         if (oldExpense.paymentMethod == "CASH" && oldExpense.cashDeskId != null) {
             treasuryDao.updateCashBalance(oldExpense.cashDeskId, oldExpense.amount)
@@ -141,7 +152,7 @@ class ExpenseAndIncomeRepository(
         expenseAndIncomeDao.updateExpense(newExpense)
     }
 
-    suspend fun deleteExpense(expense: ExpenseEntity) {
+    suspend fun deleteExpense(expense: ExpenseEntity) = runInTransaction {
         // Revert treasury balance effect (+amount)
         if (expense.paymentMethod == "CASH" && expense.cashDeskId != null) {
             treasuryDao.updateCashBalance(expense.cashDeskId, expense.amount)
@@ -185,7 +196,7 @@ class ExpenseAndIncomeRepository(
     fun getIncomesBetweenDates(startDate: String, endDate: String): Flow<List<IncomeEntity>> =
         expenseAndIncomeDao.getIncomesBetweenDates(startDate, endDate)
 
-    suspend fun createIncome(income: IncomeEntity): Long {
+    suspend fun createIncome(income: IncomeEntity): Long = runInTransaction {
         // 1. Create a double-entry accounting journal voucher
         val voucherId = try {
             val entry = JournalEntryEntity(
@@ -232,10 +243,10 @@ class ExpenseAndIncomeRepository(
         }
 
         // 3. Save Income Entity
-        return expenseAndIncomeDao.insertIncome(income.copy(voucherId = voucherId))
+        expenseAndIncomeDao.insertIncome(income.copy(voucherId = voucherId))
     }
 
-    suspend fun updateIncome(oldIncome: IncomeEntity, newIncome: IncomeEntity) {
+    suspend fun updateIncome(oldIncome: IncomeEntity, newIncome: IncomeEntity) = runInTransaction {
         // Revert old treasury balance effect
         if (oldIncome.depositMethod == "CASH" && oldIncome.cashDeskId != null) {
             treasuryDao.updateCashBalance(oldIncome.cashDeskId, -oldIncome.amount)
@@ -282,7 +293,7 @@ class ExpenseAndIncomeRepository(
         expenseAndIncomeDao.updateIncome(newIncome)
     }
 
-    suspend fun deleteIncome(income: IncomeEntity) {
+    suspend fun deleteIncome(income: IncomeEntity) = runInTransaction {
         // Revert treasury balance effect (-amount)
         if (income.depositMethod == "CASH" && income.cashDeskId != null) {
             treasuryDao.updateCashBalance(income.cashDeskId, -income.amount)
