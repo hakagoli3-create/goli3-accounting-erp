@@ -293,19 +293,30 @@ abstract class AppDatabase : RoomDatabase() {
             synchronized(this) {
                 try {
                     val currentInstance = INSTANCE
-                    if (currentInstance != null && currentInstance.isOpen) {
+                    if (currentInstance != null) {
                         try {
-                            val db = currentInstance.openHelper.writableDatabase
-                            val cursor = db.query("PRAGMA wal_checkpoint(TRUNCATE)")
-                            cursor.moveToFirst()
-                            cursor.close()
+                            if (currentInstance.isOpen) {
+                                val db = currentInstance.openHelper.writableDatabase
+                                val cursor = db.query("PRAGMA wal_checkpoint(TRUNCATE)")
+                                cursor.moveToFirst()
+                                cursor.close()
+                            }
                         } catch (e: Exception) {
                             android.util.Log.w("AppDatabase", "Warning WAL checkpoint before close: ${e.message}")
                         }
-                        currentInstance.close()
+                        try {
+                            currentInstance.openHelper.close()
+                        } catch (e: Exception) {
+                            android.util.Log.w("AppDatabase", "Error closing openHelper: ${e.message}")
+                        }
+                        try {
+                            currentInstance.close()
+                        } catch (e: Exception) {
+                            android.util.Log.w("AppDatabase", "Error closing instance: ${e.message}")
+                        }
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e("AppDatabase", "Error closing Room database instance: ${e.message}", e)
+                    android.util.Log.e("AppDatabase", "Error closing Room database: ${e.message}", e)
                 } finally {
                     INSTANCE = null
                 }

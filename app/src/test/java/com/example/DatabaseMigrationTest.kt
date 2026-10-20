@@ -481,5 +481,11 @@ class DatabaseMigrationTest {
 
         val existingBackups = com.example.util.DatabaseBackupHelper.getExistingBackupFiles(context)
         assertTrue(existingBackups.isNotEmpty())
+
+        // Test restoreDatabaseFromFile
+        val restoreUri = android.net.Uri.fromFile(backupFile)
+        val restoreResult = com.example.util.DatabaseBackupHelper.restoreDatabaseFromFile(context, restoreUri)
+        assertTrue("Restore should succeed", restoreResult.isSuccess)
+        assertTrue(restoreResult.getOrDefault(false))
     }
 }
