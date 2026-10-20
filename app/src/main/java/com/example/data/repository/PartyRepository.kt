@@ -4,7 +4,7 @@ import com.example.data.dao.PartyDao
 import com.example.data.model.PartyEntity
 import kotlinx.coroutines.flow.Flow
 
-class PartyRepository(private val dao: PartyDao) {
+class PartyRepository(val dao: PartyDao) {
 
     val allParties: Flow<List<PartyEntity>> = dao.getAllParties()
     val allCustomers: Flow<List<PartyEntity>> = dao.getAllCustomers()

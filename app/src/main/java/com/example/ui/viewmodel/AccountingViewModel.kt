@@ -136,9 +136,7 @@ class AccountingViewModel(
         onSuccess: () -> Unit
     ) {
         viewModelScope.launch {
-            repository.addPartyTransaction(partyId, description, debit, credit, jalaliDate)
-            val netEffect = debit - credit
-            partyRepo.updatePartyBalance(partyId, netEffect)
+            repository.addPartyTransaction(partyId, description, debit, credit, jalaliDate, partyRepo.dao)
             _operationMessage.value = "گردش حساب با موفقیت در دفتر معین ثبت شد."
             onSuccess()
         }
@@ -152,13 +150,7 @@ class AccountingViewModel(
         onSuccess: () -> Unit
     ) {
         viewModelScope.launch {
-            val oldNet = item.debit - item.credit
-            val newNet = newDebit - newCredit
-            val diff = newNet - oldNet
-            repository.updateJournalItem(item.copy(description = newDescription, debit = newDebit, credit = newCredit))
-            if (item.partyId != null && diff != 0L) {
-                partyRepo.updatePartyBalance(item.partyId, diff)
-            }
+            repository.updatePartyTransaction(item, newDescription, newDebit, newCredit, partyRepo.dao)
             _operationMessage.value = "ردیف دفتر معین با موفقیت ویرایش گردید."
             onSuccess()
         }
@@ -169,11 +161,7 @@ class AccountingViewModel(
         onSuccess: () -> Unit
     ) {
         viewModelScope.launch {
-            repository.deleteJournalItem(item.id)
-            if (item.partyId != null) {
-                val reverse = -(item.debit - item.credit)
-                partyRepo.updatePartyBalance(item.partyId, reverse)
-            }
+            repository.deletePartyTransaction(item, partyRepo.dao)
             _operationMessage.value = "ردیف دفتر معین حذف شد."
             onSuccess()
         }

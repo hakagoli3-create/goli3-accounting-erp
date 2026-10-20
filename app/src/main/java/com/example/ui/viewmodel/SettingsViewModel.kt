@@ -1,11 +1,14 @@
 package com.example.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.example.data.model.AppSecurityAndSettingsManager
 import com.example.data.model.StoreProfile
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 /**
  * وضعیت داده‌های فرم مشخصات بازرگانی و تنظیمات فروشگاه
@@ -41,6 +44,25 @@ class SettingsViewModel(
 
     init {
         loadCurrentProfile()
+        viewModelScope.launch {
+            securityManager.storeProfile.collect { profile ->
+                _uiState.update { current ->
+                    current.copy(
+                        name = profile.name,
+                        managerName = profile.managerName,
+                        phone = profile.phone,
+                        mobile = profile.mobile,
+                        address = profile.address,
+                        nationalCode = profile.nationalCode,
+                        economicCode = profile.economicCode,
+                        defaultBankCard = profile.defaultBankCard,
+                        defaultSheba = profile.defaultSheba,
+                        taxRate = profile.taxRatePercent.toString(),
+                        wholesaleDiscountLimit = profile.wholesaleDiscountLimitPercent.toString()
+                    )
+                }
+            }
+        }
     }
 
     /**
@@ -64,52 +86,57 @@ class SettingsViewModel(
     }
 
     fun onNameChange(value: String) {
-        _uiState.value = _uiState.value.copy(name = value, isSavedSuccess = false)
+        _uiState.update { it.copy(name = value, isSavedSuccess = false) }
         persistState()
     }
 
     fun onManagerNameChange(value: String) {
-        _uiState.value = _uiState.value.copy(managerName = value, isSavedSuccess = false)
+        _uiState.update { it.copy(managerName = value, isSavedSuccess = false) }
         persistState()
     }
 
     fun onPhoneChange(value: String) {
-        _uiState.value = _uiState.value.copy(phone = value, isSavedSuccess = false)
+        _uiState.update { it.copy(phone = value, isSavedSuccess = false) }
         persistState()
     }
 
     fun onMobileChange(value: String) {
-        _uiState.value = _uiState.value.copy(mobile = value, isSavedSuccess = false)
+        _uiState.update { it.copy(mobile = value, isSavedSuccess = false) }
         persistState()
     }
 
     fun onAddressChange(value: String) {
-        _uiState.value = _uiState.value.copy(address = value, isSavedSuccess = false)
+        _uiState.update { it.copy(address = value, isSavedSuccess = false) }
         persistState()
     }
 
     fun onNationalCodeChange(value: String) {
-        _uiState.value = _uiState.value.copy(nationalCode = value, isSavedSuccess = false)
+        _uiState.update { it.copy(nationalCode = value, isSavedSuccess = false) }
         persistState()
     }
 
     fun onEconomicCodeChange(value: String) {
-        _uiState.value = _uiState.value.copy(economicCode = value, isSavedSuccess = false)
+        _uiState.update { it.copy(economicCode = value, isSavedSuccess = false) }
         persistState()
     }
 
     fun onDefaultBankCardChange(value: String) {
-        _uiState.value = _uiState.value.copy(defaultBankCard = value, isSavedSuccess = false)
+        _uiState.update { it.copy(defaultBankCard = value, isSavedSuccess = false) }
         persistState()
     }
 
     fun onDefaultShebaChange(value: String) {
-        _uiState.value = _uiState.value.copy(defaultSheba = value, isSavedSuccess = false)
+        _uiState.update { it.copy(defaultSheba = value, isSavedSuccess = false) }
         persistState()
     }
 
     fun onTaxRateChange(value: String) {
-        _uiState.value = _uiState.value.copy(taxRate = value, isSavedSuccess = false)
+        _uiState.update { it.copy(taxRate = value, isSavedSuccess = false) }
+        persistState()
+    }
+
+    fun onWholesaleDiscountLimitChange(value: String) {
+        _uiState.update { it.copy(wholesaleDiscountLimit = value, isSavedSuccess = false) }
         persistState()
     }
 
@@ -139,7 +166,7 @@ class SettingsViewModel(
      */
     fun saveProfile(): Boolean {
         persistState()
-        _uiState.value = _uiState.value.copy(isSavedSuccess = true)
+        _uiState.update { it.copy(isSavedSuccess = true) }
         return true
     }
 }

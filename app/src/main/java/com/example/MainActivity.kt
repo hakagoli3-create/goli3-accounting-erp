@@ -365,6 +365,7 @@ fun AuthenticatedAppContent(
     val treasuryViewModel: TreasuryViewModel = viewModel(factory = factory)
     val partyViewModel: PartyViewModel = viewModel(factory = factory)
     val expenseAndIncomeViewModel: com.example.ui.viewmodel.ExpenseAndIncomeViewModel = viewModel(factory = factory)
+    val settingsViewModel: com.example.ui.viewmodel.SettingsViewModel = viewModel(factory = factory)
 
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -883,7 +884,8 @@ fun AuthenticatedAppContent(
                                 SettingsScreen(
                                     securityManager = securityManager,
                                     isDarkTheme = isDarkTheme,
-                                    onToggleDarkTheme = onToggleDarkTheme
+                                    onToggleDarkTheme = onToggleDarkTheme,
+                                    viewModel = settingsViewModel
                                 )
                             } else {
                                 AccessDeniedCard(

@@ -5,6 +5,7 @@ import com.example.data.model.BankAccountEntity
 import com.example.data.model.CashDeskEntity
 import com.example.data.model.ChequeEntity
 import com.example.util.JalaliDate
+import androidx.room.withTransaction
 import com.example.data.database.AppDatabase
 import kotlinx.coroutines.flow.Flow
 
@@ -45,8 +46,58 @@ class TreasuryRepository(
     suspend fun updateCheque(cheque: ChequeEntity) = dao.updateCheque(cheque)
     suspend fun deleteCheque(cheque: ChequeEntity) = dao.deleteCheque(cheque)
 
-    suspend fun transferBetweenAccounts(fromType: String, fromId: Long, toType: String, toId: Long, amount: Long) {
-        dao.transferBetweenAccounts(fromType, fromId, toType, toId, amount)
+    suspend fun transferBetweenAccounts(
+        fromType: String,
+        fromId: Long,
+        toType: String,
+        toId: Long,
+        amount: Long,
+        fromName: String? = null,
+        toName: String? = null,
+        notes: String = "",
+        accountingDao: com.example.data.dao.AccountingDao? = null
+    ) {
+        if (appDatabase != null) {
+            appDatabase.withTransaction {
+                dao.transferBetweenAccounts(fromType, fromId, toType, toId, amount)
+                if (accountingDao != null && fromName != null && toName != null) {
+                    val today = JalaliDate.now()
+                    val fromSub = if (fromType == "CASH") 10101 else 10102
+                    val toSub = if (toType == "CASH") 10101 else 10102
+                    val journalItems = listOf(
+                        com.example.data.model.JournalItemEntity(
+                            voucherId = 0L,
+                            generalCode = 101,
+                            subsidiaryCode = toSub,
+                            description = "انتقال وجه وارده به $toName بابت جابجایی از $fromName",
+                            debit = amount,
+                            credit = 0L
+                        ),
+                        com.example.data.model.JournalItemEntity(
+                            voucherId = 0L,
+                            generalCode = 101,
+                            subsidiaryCode = fromSub,
+                            description = "خروج وجه از $fromName بابت انتقال به $toName",
+                            debit = 0L,
+                            credit = amount
+                        )
+                    )
+                    val nextVoucherNumber = accountingDao.getMaxVoucherNumber() + 1
+                    accountingDao.createVoucherWithItems(
+                        com.example.data.model.JournalEntryEntity(
+                            voucherNumber = nextVoucherNumber,
+                            jalaliDate = today.toStandardString(),
+                            description = "انتقال وجه بین حساب‌ها: از $fromName به $toName ${notes.ifBlank { "" }}".trim(),
+                            isBalanced = true,
+                            status = "FINAL"
+                        ),
+                        journalItems
+                    )
+                }
+            }
+        } else {
+            dao.transferBetweenAccounts(fromType, fromId, toType, toId, amount)
+        }
     }
 
     // Multi-Currency Balances

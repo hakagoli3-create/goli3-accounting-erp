@@ -1,28 +1,32 @@
 package com.example.data.database
 
 import com.example.data.model.AccountGroupEntity
-import com.example.data.model.BankAccountEntity
 import com.example.data.model.CashDeskEntity
-import com.example.data.model.ChequeEntity
+import com.example.data.model.ExchangeRateEntity
+import com.example.data.model.ExpenseCategoryEntity
 import com.example.data.model.GeneralAccountEntity
-import com.example.data.model.InventoryMovementEntity
-import com.example.data.model.InvoiceEntity
-import com.example.data.model.InvoiceItemEntity
-import com.example.data.model.JournalEntryEntity
-import com.example.data.model.JournalItemEntity
-import com.example.data.model.PartyEntity
-import com.example.data.model.ProductEntity
+import com.example.data.model.IncomeCategoryEntity
 import com.example.data.model.SubsidiaryAccountEntity
+import com.example.data.model.TreasuryCurrencyBalanceEntity
+import com.example.data.model.UserEntity
 import com.example.data.model.WarehouseEntity
 import com.example.util.JalaliDate
 
+/**
+ * مدیریت تزریق داده‌های ساختاری پایه سیستم حسابداری و بازرگانی گلی
+ * 
+ * اصول طراحی پاک (Clean Architecture & Clean Slate):
+ * ۱. عدم تزریق هرگونه داده، تراکنش، شماره تماس، کارت بانکی، کالا یا طرف‌حساب ساختگی/تستی
+ * ۲. راه‌اندازی ساختار استاندارد کدینگ حسابداری چندسطحی (گروه‌ها، کل‌ها و معین‌های استاندارد)
+ * ۳. ایجاد انبار و صندوق اصلی پیش‌فرض با مانده صفر جهت شروع به کار فوری نرم‌افزار
+ * ۴. سرفصل‌های موضوعی استاندارد هزینه‌ها و درآمدها
+ */
 object DatabaseSeeder {
 
     suspend fun seedDefaultData(db: AppDatabase) {
-        val today = JalaliDate.now()
-        val todayStr = today.toStandardString()
+        val todayStr = JalaliDate.now().toStandardString()
 
-        // 1. Account Groups (گروه‌های اصلی حسابداری)
+        // ۱. گروه‌های اصلی حسابداری (Account Groups) بر اساس استانداردهای رسمی
         val groups = listOf(
             AccountGroupEntity(1, "دارایی‌های جاری", "DEBIT"),
             AccountGroupEntity(2, "دارایی‌های غیرجاری", "DEBIT"),
@@ -35,7 +39,7 @@ object DatabaseSeeder {
         )
         db.accountingDao().insertAccountGroups(groups)
 
-        // 2. General Accounts (حساب‌های کل)
+        // ۲. حساب‌های کل (General Accounts)
         val generals = listOf(
             GeneralAccountEntity(101, 1, "موجودی نقد و بانک", "DEBIT"),
             GeneralAccountEntity(102, 1, "حساب‌ها و اسناد دریافتنی تجاری", "DEBIT"),
@@ -44,13 +48,13 @@ object DatabaseSeeder {
             GeneralAccountEntity(301, 3, "حساب‌ها و اسناد پرداختنی تجاری", "CREDIT"),
             GeneralAccountEntity(302, 3, "پیش‌دریافت‌ها و مالیات پرداختنی", "CREDIT"),
             GeneralAccountEntity(501, 5, "سرمایه اولیه موسسه", "CREDIT"),
-            GeneralAccountEntity(601, 6, "درآمد حاصل از فروش کالا", "CREDIT"),
+            GeneralAccountEntity(601, 6, "درآمد حاصل از فروش کالا و خدمات", "CREDIT"),
             GeneralAccountEntity(701, 7, "بهای تمام شده کالای فروش رفته", "DEBIT"),
             GeneralAccountEntity(801, 8, "هزینه‌های حقوق، کرایه و ملزومات", "DEBIT")
         )
         db.accountingDao().insertGeneralAccounts(generals)
 
-        // 3. Subsidiary Accounts (حساب‌های معین)
+        // ۳. حساب‌های معین استاندارد (Subsidiary Accounts)
         val subsidiaries = listOf(
             SubsidiaryAccountEntity(10101, 101, "صندوق‌های فروشگاه و دخل", "DEBIT"),
             SubsidiaryAccountEntity(10102, 101, "حساب‌های بانکی و پوز POS", "DEBIT"),
@@ -61,520 +65,71 @@ object DatabaseSeeder {
             SubsidiaryAccountEntity(10302, 103, "موجودی انبار فروشگاه", "DEBIT"),
             SubsidiaryAccountEntity(30101, 301, "بستانکاران تجاری (تامین‌کنندگان کالا)", "CREDIT"),
             SubsidiaryAccountEntity(30102, 301, "اسناد پرداختنی (چک‌های صادره)", "CREDIT"),
-            SubsidiaryAccountEntity(50101, 501, "سرمایه ثبت شده شرکت گلی", "CREDIT"),
-            SubsidiaryAccountEntity(60101, 601, "فروش نقدی و اعتباری اجناس", "CREDIT"),
+            SubsidiaryAccountEntity(30201, 302, "مالیات بر ارزش افزوده و عوارض پرداختنی", "CREDIT"),
+            SubsidiaryAccountEntity(50101, 501, "سرمایه ثبت شده شرکت", "CREDIT"),
+            SubsidiaryAccountEntity(60101, 601, "فروش نقدی و اعتباری کالا", "CREDIT"),
+            SubsidiaryAccountEntity(60102, 601, "برگشت از فروش و تخفیفات نقدی", "DEBIT"),
             SubsidiaryAccountEntity(70101, 701, "قیمت تمام شده اجناس فروش رفته", "DEBIT"),
             SubsidiaryAccountEntity(80101, 801, "هزینه‌های پرسنلی و حقوق", "DEBIT"),
-            SubsidiaryAccountEntity(80102, 801, "کرایه حمل و هزینه‌های بسته‌بندی", "DEBIT")
+            SubsidiaryAccountEntity(80102, 801, "کرایه حمل، ملزومات و بسته‌بندی", "DEBIT")
         )
         db.accountingDao().insertSubsidiaryAccounts(subsidiaries)
 
-        // 4. Warehouses (انبارها)
-        val warehouses = listOf(
-            WarehouseEntity(1, "W101", "انبار مرکزی تهران", "مهندس محمدی", "خیابان آزادی، پلاک ۱۲", "021-66778899", isDefault = true),
-            WarehouseEntity(2, "W102", "انبار فروشگاه و دخل", "خانم اکبری", "بازار بزرگ، سرای امید", "021-55443322", isDefault = false),
-            WarehouseEntity(3, "W103", "انبار ضایعات و مرجوعی", "آقای حسینی", "خیابان فداییان اسلام", "021-33221100", isDefault = false)
-        )
-        db.inventoryDao().insertWarehouses(warehouses)
-
-        // 5. Products (کالاها با واحد اصلی و فرعی و قیمت‌گذاری چندسطحی)
-        val products = listOf(
-            ProductEntity(
-                id = 1,
-                code = "PRD-101",
-                barcode = "6260123456781",
-                name = "روغن زیتون فرابکر ۱ لیتری گلی",
-                category = "روغن‌ها و چاشنی",
-                primaryUnit = "کارتن",
-                secondaryUnit = "عدد",
-                conversionRate = 12.0,
-                currentStockInSecondary = 48.0, // 4 کارتن
-                minStockThreshold = 12.0,
-                buyPrice = 250000L,
-                retailPrice = 320000L,
-                wholesalePrice = 285000L,
-                partnerPrice = 275000L,
-                description = "روغن زیتون طبیعی بکر با اسیدیته زیر ۰.۵ درصد"
-            ),
-            ProductEntity(
-                id = 2,
-                code = "PRD-102",
-                barcode = "6260123456782",
-                name = "برنج طارم هاشمی درجه یک معطر",
-                category = "غلات و برنج",
-                primaryUnit = "کیسه ۱۰k",
-                secondaryUnit = "کیلوگرم",
-                conversionRate = 10.0,
-                currentStockInSecondary = 120.0, // 12 کیسه
-                minStockThreshold = 20.0,
-                buyPrice = 110000L,
-                retailPrice = 150000L,
-                wholesalePrice = 135000L,
-                partnerPrice = 128000L,
-                description = "برنج اعلای گیلان سورت شده و الک شده"
-            ),
-            ProductEntity(
-                id = 3,
-                code = "PRD-103",
-                barcode = "6260123456783",
-                name = "چای سیلان زرین اعلای گلی (۵۰۰ گرمی)",
-                category = "نوشیدنی و دمنوش",
-                primaryUnit = "کارتن",
-                secondaryUnit = "بسته",
-                conversionRate = 20.0,
-                currentStockInSecondary = 60.0, // 3 کارتن
-                minStockThreshold = 15.0,
-                buyPrice = 175000L,
-                retailPrice = 225000L,
-                wholesalePrice = 198000L,
-                partnerPrice = 190000L,
-                description = "چای شکسته خارجی با عطر برگاموت طبیعی"
-            ),
-            ProductEntity(
-                id = 4,
-                code = "PRD-104",
-                barcode = "6260123456784",
-                name = "رب گوجه فرنگی غلیظ ۸۰۰ گرمی",
-                category = "کنسرویجات",
-                primaryUnit = "باکس",
-                secondaryUnit = "قوطی",
-                conversionRate = 12.0,
-                currentStockInSecondary = 8.0, // کمبود موجودی نسبت به نقطه سفارش!
-                minStockThreshold = 24.0,
-                buyPrice = 62000L,
-                retailPrice = 85000L,
-                wholesalePrice = 73000L,
-                partnerPrice = 70000L,
-                description = "رب گوجه بریکس ۲۷ درصد قوطی کلیددار"
-            ),
-            ProductEntity(
-                id = 5,
-                code = "PRD-105",
-                barcode = "6260123456785",
-                name = "شکر سفید تصفیه شده یک کیلویی",
-                category = "قند و شکر",
-                primaryUnit = "کارتن",
-                secondaryUnit = "بسته",
-                conversionRate = 24.0,
-                currentStockInSecondary = 96.0, // 4 کارتن
-                minStockThreshold = 24.0,
-                buyPrice = 38000L,
-                retailPrice = 49000L,
-                wholesalePrice = 43000L,
-                partnerPrice = 41500L,
-                description = "شکر استاندارد بسته‌بندی نایلونی"
-            ),
-            ProductEntity(
-                id = 6,
-                code = "PRD-106",
-                barcode = "6260123456786",
-                name = "ماکارونی ۷۰۰ گرمی زر مانا",
-                category = "غلات و ماکارونی",
-                primaryUnit = "کارتن",
-                secondaryUnit = "بسته",
-                conversionRate = 20.0,
-                currentStockInSecondary = 80.0,
-                minStockThreshold = 20.0,
-                buyPrice = 24000L,
-                retailPrice = 33000L,
-                wholesalePrice = 28000L,
-                partnerPrice = 26500L,
-                description = "ماکارونی رشته‌ای ضخامت ۱.۵ غنی شده"
-            )
-        )
-        db.inventoryDao().insertProducts(products)
-
-        // 6. Parties (CRM مشتریان با سقف اعتبار ریالی)
-        val parties = listOf(
-            PartyEntity(
-                id = 1,
-                code = "CUS-101",
-                name = "هایپرمارکت بزرگ بهارستان",
-                companyName = "شرکت پخش بهارستان امید",
-                mobile = "09121112233",
-                phone = "021-88990011",
-                address = "میدان بهارستان، خیابان صفی علی شاه، پلاک ۴۴",
-                nationalCode = "10103456789",
-                partyType = "CUSTOMER",
-                creditLimit = 60000000L, // سقف اعتبار ۶۰ میلیون تومان
-                currentBalance = 14500000L, // بدهکار ۱۴.۵ میلیون تومان (در محدوده مجاز)
-                notes = "مشتری خوش‌حساب و فعال منطقه ۱۲"
-            ),
-            PartyEntity(
-                id = 2,
-                code = "CUS-102",
-                name = "سوپرمارکت و پروتئینی آریا",
-                companyName = "فروشگاه آریا غرب",
-                mobile = "09129876543",
-                phone = "021-44332211",
-                address = "ستارخان، بعد از پل یادگار، نرسیده به بازارچه سنتی",
-                nationalCode = "0078945612",
-                partyType = "CUSTOMER",
-                creditLimit = 20000000L, // سقف اعتبار ۲۰ میلیون تومان
-                currentBalance = 19200000L, // بدهکار ۱۹.۲ میلیون تومان (هشدار: نزدیک به سقف!)
-                notes = "نیاز به تسویه حساب قبل از سفارش‌های بعدی بیش از ۱ میلیون"
-            ),
-            PartyEntity(
-                id = 3,
-                code = "CUS-103",
-                name = "بنکداری و پخش برادران رضایی",
-                companyName = "بازرگانی رضایی",
-                mobile = "09133334455",
-                phone = "031-32214455",
-                address = "اصفهان، میدان امام، سرای تحدید",
-                nationalCode = "1289945621",
-                partyType = "CUSTOMER",
-                creditLimit = 150000000L,
-                currentBalance = 0L,
-                notes = "خرید عمده کارتن و پرداخت با چک‌های معتبر صیادی"
-            ),
-            PartyEntity(
-                id = 4,
-                code = "SUP-201",
-                name = "صنایع غذایی و کشت و صنعت مهر البرز",
-                companyName = "مهر البرز هلدینگ",
-                mobile = "09124445566",
-                phone = "026-34567890",
-                address = "شهرک صنعتی بهارستان، خیابان گلستان ۶",
-                nationalCode = "10100987654",
-                partyType = "SUPPLIER",
-                creditLimit = 0L,
-                currentBalance = -32000000L, // بستانکار ۳۲ میلیون تومان (ما بدهکاریم)
-                notes = "تامین‌کننده اصلی روغن زیتون و سس‌های ارگانیک"
-            ),
-            PartyEntity(
-                id = 5,
-                code = "SUP-202",
-                name = "شرکت پخش سراسری غلات خاورمیانه",
-                companyName = "غلات خاورمیانه سهامی خاص",
-                mobile = "09127778899",
-                phone = "021-22334455",
-                address = "بلوار میرداماد، برج آرین، طبقه ۷",
-                nationalCode = "10101122334",
-                partyType = "SUPPLIER",
-                creditLimit = 0L,
-                currentBalance = -18500000L, // بستانکار ۱۸.۵ میلیون تومان
-                notes = "تامین‌کننده برنج طارم و شکر"
-            )
-        )
-        db.partyDao().insertParties(parties)
-
-        // 7. Treasury: Cash Desks & Bank Accounts
-        val cashDesks = listOf(
-            CashDeskEntity(1, "CSH-01", "صندوق مرکزی و مدیریت", 32500000L, "مسئول صندوق", "صندوق اصلی مستقر در اتاق مدیریت"),
-            CashDeskEntity(2, "CSH-02", "دخل فروشگاه و نقدینگی صندوقدار", 8400000L, "صندوق‌دار فروشگاه", "دخل روزانه پایانه فروشگاه")
-        )
-        db.treasuryDao().insertCashDesks(cashDesks)
-
-        val bankAccounts = listOf(
-            BankAccountEntity(
-                id = 1,
-                bankName = "بانک ملت",
-                accountNumber = "4982345120",
-                shebaNumber = "IR45012000000004982345120",
-                cardNumber = "6104-3378-9876-1234",
-                branch = "شعبه بازار بزرگ (کد ۱۲۴)",
-                currentBalance = 145000000L,
-                hasPos = true,
-                posTerminalId = "POS-MLT-9872"
-            ),
-            BankAccountEntity(
-                id = 2,
-                bankName = "بانک صادرات ایران",
-                accountNumber = "0103456789004",
-                shebaNumber = "IR1901900000000103456789004",
-                cardNumber = "6037-6919-4455-6677",
-                branch = "شعبه میدان شهدا",
-                currentBalance = 58200000L,
-                hasPos = true,
-                posTerminalId = "POS-SDR-5411"
-            )
-        )
-        db.treasuryDao().insertBankAccounts(bankAccounts)
-
-        // 8. Cheques with due date alerts
-        val dueIn2Days = today.addDays(2)
-        val dueIn5Days = today.addDays(5)
-        val overdueDate = today.addDays(-3)
-
-        val cheques = listOf(
-            ChequeEntity(
-                id = 1,
-                chequeNumber = "CHK-9812",
-                sayadNumber = "7812903456123456",
-                type = "RECEIVABLE", // چک دریافتی از مشتری
-                partyId = 1,
-                partyName = "هایپرمارکت بهارستان",
-                bankName = "بانک ملت",
-                branch = "شعبه مرکزی",
-                amount = 14500000L,
-                issueDateJalali = today.addDays(-20).toStandardString(),
-                dueDateJalali = dueIn2Days.toStandardString(),
-                dueDateEpochMillis = dueIn2Days.toEpochMillis(),
-                status = "NORMAL",
-                notes = "بابت تسویه فاکتور فروش شماره ۱۰۴"
-            ),
-            ChequeEntity(
-                id = 2,
-                chequeNumber = "CHK-5534",
-                sayadNumber = "4321098765432109",
-                type = "RECEIVABLE",
-                partyId = 2,
-                partyName = "سوپرمارکت آریا",
-                bankName = "بانک سپه",
-                branch = "شعبه ستارخان",
-                amount = 8200000L,
-                issueDateJalali = today.addDays(-15).toStandardString(),
-                dueDateJalali = todayStr, // سررسید امروز!
-                dueDateEpochMillis = today.toEpochMillis(),
-                status = "NORMAL",
-                notes = "چک تضمین خرید نسیه ماه جاری"
-            ),
-            ChequeEntity(
-                id = 3,
-                chequeNumber = "CHK-7741",
-                sayadNumber = "9988776655443322",
-                type = "PAYABLE", // چک پرداختی به تامین‌کننده
-                partyId = 4,
-                partyName = "صنایع غذایی مهر البرز",
-                bankName = "بانک صادرات",
-                branch = "شعبه شهدا",
-                amount = 22000000L,
-                issueDateJalali = today.addDays(-10).toStandardString(),
-                dueDateJalali = dueIn5Days.toStandardString(),
-                dueDateEpochMillis = dueIn5Days.toEpochMillis(),
-                status = "NORMAL",
-                notes = "قسط اول خرید عمده روغن زیتون فرابکر"
-            ),
-            ChequeEntity(
-                id = 4,
-                chequeNumber = "CHK-1102",
-                sayadNumber = "5544332211009988",
-                type = "RECEIVABLE",
-                partyId = 3,
-                partyName = "بنکداری برادران رضایی",
-                bankName = "بانک ملی",
-                branch = "اصفهان",
-                amount = 45000000L,
-                issueDateJalali = today.addDays(-35).toStandardString(),
-                dueDateJalali = overdueDate.toStandardString(),
-                dueDateEpochMillis = overdueDate.toEpochMillis(),
-                status = "NORMAL", // سررسید گذشته (هشدار مهم!)
-                notes = "پیگیری فوری با آقای رضایی جهت وصول"
-            )
-        )
-        db.treasuryDao().insertCheques(cheques)
-
-        // 9. Initial Journal Entries (سند افتتاحیه و ثبت متوازن)
-        val openingVoucher = JournalEntryEntity(
+        // ۴. انبار اصلی پیش‌فرض (کاملاً تمیز و آماده ورود اطلاعات توسط کاربر)
+        val defaultWarehouse = WarehouseEntity(
             id = 1,
-            voucherNumber = 1,
-            jalaliDate = todayStr,
-            description = "سند افتتاحیه و استقرار مانده حساب‌های اولیه شرکت گلی",
-            isBalanced = true,
-            status = "FINAL"
+            code = "W01",
+            name = "انبار مرکزی",
+            managerName = "",
+            address = "",
+            phone = "",
+            isDefault = true
         )
-        val voucherId = db.accountingDao().insertJournalEntry(openingVoucher)
+        db.inventoryDao().insertWarehouses(listOf(defaultWarehouse))
 
-        val items = listOf(
-            JournalItemEntity(
-                voucherId = voucherId,
-                generalCode = 101,
-                subsidiaryCode = 10101,
-                description = "موجودی صندوق مرکزی در بدو افتتاح",
-                debit = 40900000L,
-                credit = 0L
-            ),
-            JournalItemEntity(
-                voucherId = voucherId,
-                generalCode = 101,
-                subsidiaryCode = 10102,
-                description = "موجودی حساب‌های بانکی ملت و صادرات",
-                debit = 203200000L,
-                credit = 0L
-            ),
-            JournalItemEntity(
-                voucherId = voucherId,
-                generalCode = 103,
-                subsidiaryCode = 10301,
-                description = "ارزش موجودی اولیه کالای انبار مرکزی",
-                debit = 65000000L,
-                credit = 0L
-            ),
-            JournalItemEntity(
-                voucherId = voucherId,
-                generalCode = 501,
-                subsidiaryCode = 50101,
-                description = "سرمایه اولیه سهامداران موسسه گلی",
-                debit = 0L,
-                credit = 309100000L
-            )
-        )
-        db.accountingDao().insertJournalItems(items)
-
-        // 10. Initial Invoices (نمونه فاکتور رسمی ثبت شده)
-        val initialInvoice = InvoiceEntity(
+        // ۵. صندوق اصلی پیش‌فرض با موجودی اولیه صفر
+        val defaultCashDesk = CashDeskEntity(
             id = 1,
-            invoiceNumber = "INV-1001",
-            invoiceType = "SALE",
-            jalaliDate = todayStr,
-            partyId = 1,
-            partyName = "هایپرمارکت بزرگ بهارستان",
-            partyPhone = "09121112233",
-            warehouseId = 1,
-            warehouseName = "انبار مرکزی تهران",
-            subtotalAmount = 6400000L,
-            discountAmount = 400000L,
-            taxAmount = 600000L,
-            totalAmount = 6600000L,
-            paymentType = "POS",
-            posAmount = 6600000L,
-            isPaid = true,
-            notes = "تحویل درب فروشگاه بهارستان - تسویه پایانه کارتخوان"
+            code = "C01",
+            name = "صندوق اصلی",
+            currentBalance = 0L,
+            keeperName = "",
+            note = ""
         )
-        val invId = db.invoiceDao().insertInvoice(initialInvoice)
-        val invoiceItems = listOf(
-            InvoiceItemEntity(
-                invoiceId = invId,
-                productId = 1,
-                productName = "روغن زیتون فرابکر ۱ لیتری گلی",
-                barcode = "6260123456781",
-                unitName = "کارتن",
-                isPrimaryUnit = true,
-                quantity = 1.0,
-                conversionRate = 12.0,
-                quantityInSecondary = 12.0,
-                unitPrice = 3420000L, // 12 * 285000
-                totalPrice = 3420000L
-            ),
-            InvoiceItemEntity(
-                invoiceId = invId,
-                productId = 2,
-                productName = "برنج طارم هاشمی درجه یک معطر",
-                barcode = "6260123456782",
-                unitName = "کیسه ۱۰k",
-                isPrimaryUnit = true,
-                quantity = 2.0,
-                conversionRate = 10.0,
-                quantityInSecondary = 20.0,
-                unitPrice = 1350000L,
-                totalPrice = 2700000L
-            )
-        )
-        db.invoiceDao().insertInvoiceItems(invoiceItems)
+        db.treasuryDao().insertCashDesks(listOf(defaultCashDesk))
 
-        // 11. Expense Categories (سرفصل‌های پیش‌فرض هزینه)
+        // ۶. سرفصل‌های پیش‌فرض هزینه‌های جاری (بدون ثبت هیچ تراکنش جعلی)
         val defaultExpenseCategories = listOf(
-            com.example.data.model.ExpenseCategoryEntity(1, "EXP-01", "اجاره محل و انبار", "اجاره ماهانه دفتر مرکزی، مغازه و انبارهای نگهداری کالا", "Store"),
-            com.example.data.model.ExpenseCategoryEntity(2, "EXP-02", "حقوق و دستمزد پرسنل", "حقوق پایه، پاداش، پورسانت فروش و بیمه کارکنان", "People"),
-            com.example.data.model.ExpenseCategoryEntity(3, "EXP-03", "کرایه حمل و باربری", "هزینه پیک موتوری، وانت‌بار، باربری بین شهری و انبارداری", "LocalShipping"),
-            com.example.data.model.ExpenseCategoryEntity(4, "EXP-04", "ملزومات و بسته‌بندی", "خرید کارتن، چسب، نایلون، کاغذ چاپگر حرارتی و اداری", "Inventory2"),
-            com.example.data.model.ExpenseCategoryEntity(5, "EXP-05", "تبلیغات و بازاریابی", "هزینه تبلیغات پیامکی، بنر، اینستاگرام و کاتالوگ", "Campaign"),
-            com.example.data.model.ExpenseCategoryEntity(6, "EXP-06", "قبوض و انشعابات", "قبوض برق، گاز، آب، تلفن ثابت و اینترنت پرسرعت", "Receipt"),
-            com.example.data.model.ExpenseCategoryEntity(7, "EXP-07", "پذیرایی و تشریفات", "خرید چای، قند، قهوه و پذیرایی از مشتریان و پرسنل", "Coffee"),
-            com.example.data.model.ExpenseCategoryEntity(8, "EXP-08", "تعمیرات و نگهداری", "سرویس کولر، تعمیر کامپیوترها، ترازو و خودرو باربری", "Build"),
-            com.example.data.model.ExpenseCategoryEntity(9, "EXP-09", "هزینه‌های متفرقه اداری", "سایر هزینه‌های پیش‌بینی‌نشده جاری شرکت", "MoreHoriz")
+            ExpenseCategoryEntity(1, "EXP-01", "اجاره محل و انبار", "اجاره ماهانه دفتر مرکزی، مغازه و انبارهای نگهداری کالا", "Store"),
+            ExpenseCategoryEntity(2, "EXP-02", "حقوق و دستمزد پرسنل", "حقوق پایه، پاداش، پورسانت فروش و بیمه کارکنان", "People"),
+            ExpenseCategoryEntity(3, "EXP-03", "کرایه حمل و باربری", "هزینه پیک موتوری، وانت‌بار، باربری بین شهری و انبارداری", "LocalShipping"),
+            ExpenseCategoryEntity(4, "EXP-04", "ملزومات و بسته‌بندی", "خرید کارتن، چسب، نایلون، کاغذ چاپگر حرارتی و اداری", "Inventory2"),
+            ExpenseCategoryEntity(5, "EXP-05", "تبلیغات و بازاریابی", "هزینه تبلیغات پیامکی، بنر، فضای مجازی و کاتالوگ", "Campaign"),
+            ExpenseCategoryEntity(6, "EXP-06", "قبوض و انشعابات", "قبوض برق، گاز، آب، تلفن ثابت و اینترنت پرسرعت", "Receipt"),
+            ExpenseCategoryEntity(7, "EXP-07", "پذیرایی و تشریفات", "خرید چای، قند، قهوه و پذیرایی از مشتریان و پرسنل", "Coffee"),
+            ExpenseCategoryEntity(8, "EXP-08", "تعمیرات و نگهداری", "سرویس کولر، تعمیر کامپیوترها، ترازو و خودرو باربری", "Build"),
+            ExpenseCategoryEntity(9, "EXP-09", "هزینه‌های متفرقه اداری", "سایر هزینه‌های پیش‌بینی‌نشده جاری شرکت", "MoreHoriz")
         )
         db.expenseAndIncomeDao().insertExpenseCategories(defaultExpenseCategories)
 
-        // Initial sample expense
-        val sampleExpense = com.example.data.model.ExpenseEntity(
-            id = 1,
-            categoryId = 3,
-            categoryTitle = "کرایه حمل و باربری",
-            amount = 350000L,
-            jalaliDate = todayStr,
-            paymentMethod = "CASH",
-            cashDeskId = 1,
-            accountName = "صندوق مرکزی فروشگاه",
-            title = "کرایه حمل بار از انبار به هایپرمارکت بهارستان",
-            notes = "وانت بار بازار - فاکتور شماره ۱۰۰۱"
-        )
-        db.expenseAndIncomeDao().insertExpense(sampleExpense)
-
-        // 12. Income Categories (سرفصل‌های درآمدهای متفرقه)
+        // ۷. سرفصل‌های پیش‌فرض درآمدهای متفرقه (بدون ثبت هیچ تراکنش جعلی)
         val defaultIncomeCategories = listOf(
-            com.example.data.model.IncomeCategoryEntity(1, "INC-01", "درآمدهای متفرقه و غیرعملیاتی", "کلیه درآمدهای خارج از چرخه اصلی فروش کالا", "TrendingUp"),
-            com.example.data.model.IncomeCategoryEntity(2, "INC-02", "سود سپرده بانکی", "سود واریزی ماهانه حساب‌های سرمایه‌گذاری", "AccountBalance"),
-            com.example.data.model.IncomeCategoryEntity(3, "INC-03", "خدمات و مشاورات بازرگانی", "کارمزد ارائه خدمات، مشاوره‌های توزیع و حق‌العمل‌کاری", "Handshake"),
-            com.example.data.model.IncomeCategoryEntity(4, "INC-04", "فروش ضایعات و کارتن", "درآمد ناشی از فروش جعبه‌های خالی، پالت و ضایعات انبار", "Recycling"),
-            com.example.data.model.IncomeCategoryEntity(5, "INC-05", "اجاره دریافتی انبار/ملک", "اجاره بخشی از فضای مازاد انبار به سایر همکاران", "HomeWork")
+            IncomeCategoryEntity(1, "INC-01", "درآمدهای متفرقه و غیرعملیاتی", "کلیه درآمدهای خارج از چرخه اصلی فروش کالا", "TrendingUp"),
+            IncomeCategoryEntity(2, "INC-02", "سود سپرده بانکی", "سود واریزی ماهانه حساب‌های سرمایه‌گذاری", "AccountBalance"),
+            IncomeCategoryEntity(3, "INC-03", "خدمات و مشاورات بازرگانی", "کارمزد ارائه خدمات، مشاوره‌های توزیع و حق‌العمل‌کاری", "Handshake"),
+            IncomeCategoryEntity(4, "INC-04", "فروش ضایعات و کارتن", "درآمد ناشی از فروش جعبه‌های خالی، پالت و ضایعات انبار", "Recycling"),
+            IncomeCategoryEntity(5, "INC-05", "اجاره دریافتی انبار/ملک", "اجاره بخشی از فضای مازاد انبار به سایر همکاران", "HomeWork")
         )
         db.expenseAndIncomeDao().insertIncomeCategories(defaultIncomeCategories)
 
-        // Initial sample income
-        val sampleIncome = com.example.data.model.IncomeEntity(
-            id = 1,
-            categoryId = 4,
-            categoryTitle = "فروش ضایعات و کارتن",
-            amount = 650000L,
-            jalaliDate = todayStr,
-            depositMethod = "BANK",
-            bankAccountId = 1,
-            accountName = "بانک ملت - جاری بازرگانی گلی",
-            title = "فروش کارتن‌های خالی تخلیه بار ماه گذشته",
-            notes = "تسویه نقدی و واریز به کارتخوان ملت"
-        )
-        db.expenseAndIncomeDao().insertIncome(sampleIncome)
-
-        // 13. Default System Users (مدیر کل، فروشنده، ویزیتور)
+        // ۸. کاربر مدیر سیستم پیش‌فرض با مشخصات پاک
         ensureDefaultUsers(db)
 
-        // 14. Initial Exchange Rates
+        // ۹. نسبت تبدیل ثابت و استاندارد ریال به تومان
         try {
-            val initialRates = listOf(
-                com.example.data.model.ExchangeRateEntity(
+            val standardRates = listOf(
+                ExchangeRateEntity(
                     id = 1,
-                    sourceCurrency = "USD",
-                    targetCurrency = "TOMAN",
-                    rate = 92000.0,
-                    inverseRate = 1.0 / 92000.0,
-                    effectiveDateJalali = todayStr,
-                    notes = "نرخ ثبت‌شده بازار و صرافی",
-                    recordedBy = "مدیر سیستم"
-                ),
-                com.example.data.model.ExchangeRateEntity(
-                    id = 2,
-                    sourceCurrency = "EUR",
-                    targetCurrency = "TOMAN",
-                    rate = 101000.0,
-                    inverseRate = 1.0 / 101000.0,
-                    effectiveDateJalali = todayStr,
-                    notes = "نرخ حواله یورو",
-                    recordedBy = "مدیر سیستم"
-                ),
-                com.example.data.model.ExchangeRateEntity(
-                    id = 3,
-                    sourceCurrency = "TRY",
-                    targetCurrency = "TOMAN",
-                    rate = 2650.0,
-                    inverseRate = 1.0 / 2650.0,
-                    effectiveDateJalali = todayStr,
-                    notes = "نرخ نقدی لیر ترکیه",
-                    recordedBy = "مدیر سیستم"
-                ),
-                com.example.data.model.ExchangeRateEntity(
-                    id = 4,
-                    sourceCurrency = "IQD",
-                    targetCurrency = "TOMAN",
-                    rate = 62.0,
-                    inverseRate = 1.0 / 62.0,
-                    effectiveDateJalali = todayStr,
-                    notes = "نرخ دینار عراق تجاری",
-                    recordedBy = "مدیر سیستم"
-                ),
-                com.example.data.model.ExchangeRateEntity(
-                    id = 5,
-                    sourceCurrency = "AED",
-                    targetCurrency = "TOMAN",
-                    rate = 25100.0,
-                    inverseRate = 1.0 / 25100.0,
-                    effectiveDateJalali = todayStr,
-                    notes = "حواله درهم امارات",
-                    recordedBy = "مدیر سیستم"
-                ),
-                com.example.data.model.ExchangeRateEntity(
-                    id = 6,
                     sourceCurrency = "IRR",
                     targetCurrency = "TOMAN",
                     rate = 0.1,
@@ -584,26 +139,20 @@ object DatabaseSeeder {
                     recordedBy = "سیستم خودکار"
                 )
             )
-            db.exchangeRateDao().insertRates(initialRates)
+            db.exchangeRateDao().insertRates(standardRates)
         } catch (_: Exception) {}
 
-        // 15. Initial Multi-Currency Treasury Balances
+        // ۱۰. ثبت ردیف مانده اولیه ارز پایه برای صندوق اصلی با مقدار صفر
         try {
-            val initialBalances = listOf(
-                com.example.data.model.TreasuryCurrencyBalanceEntity(1, "CASH", 1, "TOMAN", 32500000.0),
-                com.example.data.model.TreasuryCurrencyBalanceEntity(2, "CASH", 1, "USD", 2500.0),
-                com.example.data.model.TreasuryCurrencyBalanceEntity(3, "CASH", 1, "EUR", 1200.0),
-                com.example.data.model.TreasuryCurrencyBalanceEntity(4, "CASH", 1, "TRY", 15000.0),
-                com.example.data.model.TreasuryCurrencyBalanceEntity(5, "CASH", 2, "TOMAN", 8400000.0),
-                com.example.data.model.TreasuryCurrencyBalanceEntity(6, "CASH", 2, "USD", 450.0),
-                com.example.data.model.TreasuryCurrencyBalanceEntity(7, "BANK", 1, "TOMAN", 145000000.0),
-                com.example.data.model.TreasuryCurrencyBalanceEntity(8, "BANK", 1, "EUR", 3500.0),
-                com.example.data.model.TreasuryCurrencyBalanceEntity(9, "BANK", 2, "TOMAN", 58200000.0),
-                com.example.data.model.TreasuryCurrencyBalanceEntity(10, "BANK", 2, "AED", 10000.0)
+            db.treasuryDao().insertOrUpdateCurrencyBalance(
+                TreasuryCurrencyBalanceEntity(
+                    id = 1,
+                    accountType = "CASH",
+                    accountId = 1,
+                    currencyCode = "TOMAN",
+                    balance = 0.0
+                )
             )
-            for (bal in initialBalances) {
-                db.treasuryDao().insertOrUpdateCurrencyBalance(bal)
-            }
         } catch (_: Exception) {}
     }
 
@@ -612,38 +161,12 @@ object DatabaseSeeder {
             val adminUser = db.userDao().getUserByUsername("admin")
             if (adminUser == null) {
                 db.userDao().insertUser(
-                    com.example.data.model.UserEntity(
+                    UserEntity(
                         username = "admin",
                         passwordHash = "1234",
-                        fullName = "مدیر کل سیستم",
+                        fullName = "مدیر سیستم",
                         role = "ADMIN",
-                        mobile = "09121112233",
-                        isActive = true
-                    )
-                )
-            }
-            val sellerUser = db.userDao().getUserByUsername("seller")
-            if (sellerUser == null) {
-                db.userDao().insertUser(
-                    com.example.data.model.UserEntity(
-                        username = "seller",
-                        passwordHash = "1234",
-                        fullName = "علی فروشنده (صندوق‌دار)",
-                        role = "POS_USER",
-                        mobile = "09123334455",
-                        isActive = true
-                    )
-                )
-            }
-            val visitorUser = db.userDao().getUserByUsername("visitor")
-            if (visitorUser == null) {
-                db.userDao().insertUser(
-                    com.example.data.model.UserEntity(
-                        username = "visitor",
-                        passwordHash = "1234",
-                        fullName = "رضا ویزیتور (بازاریاب)",
-                        role = "VISITOR",
-                        mobile = "09127778899",
+                        mobile = "",
                         isActive = true
                     )
                 )

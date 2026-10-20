@@ -230,7 +230,7 @@ class AppSecurityAndSettingsManager(context: Context) {
             .putString("logged_in_username", username)
             .putString("logged_in_fullname", fullName)
             .putString("user_role", role.name)
-            .apply()
+            .commit()
     }
 
     fun logout() {
@@ -242,12 +242,12 @@ class AppSecurityAndSettingsManager(context: Context) {
             .putBoolean("is_logged_in", false)
             .putString("logged_in_username", "")
             .putString("logged_in_fullname", "")
-            .apply()
+            .commit()
     }
 
     fun switchRole(role: UserRole) {
         _currentRole.value = role
-        prefs.edit().putString("user_role", role.name).apply()
+        prefs.edit().putString("user_role", role.name).commit()
     }
 
     fun updateProfile(profile: StoreProfile) {
@@ -271,7 +271,7 @@ class AppSecurityAndSettingsManager(context: Context) {
         _syncStatus.value = status
         if (time != null) {
             _lastSyncTime.value = time
-            prefs.edit().putString("last_sync_time", time).apply()
+            prefs.edit().putString("last_sync_time", time).commit()
         }
     }
 
@@ -344,7 +344,7 @@ class AppSecurityAndSettingsManager(context: Context) {
                 obj.put("decimals", item.decimals)
                 array.put(obj)
             }
-            prefs.edit().putString("system_currencies", array.toString()).apply()
+            prefs.edit().putString("system_currencies", array.toString()).commit()
         } catch (_: Exception) {}
     }
 

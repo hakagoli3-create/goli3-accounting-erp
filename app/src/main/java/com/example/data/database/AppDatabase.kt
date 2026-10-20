@@ -201,9 +201,9 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("""
                     INSERT OR IGNORE INTO users (id, username, passwordHash, fullName, role, mobile, isActive, createdAt)
                     VALUES 
-                    (1, 'admin', '1234', 'مدیر کل سیستم', 'ADMIN', '09121112233', 1, 1700000000000),
-                    (2, 'seller', '1234', 'علی فروشنده (صندوق‌دار)', 'POS_USER', '09123334455', 1, 1700000000000),
-                    (3, 'visitor', '1234', 'رضا ویزیتور (بازاریاب)', 'VISITOR', '09127778899', 1, 1700000000000)
+                    (1, 'admin', '1234', 'مدیر کل سیستم', 'ADMIN', '', 1, 1700000000000),
+                    (2, 'seller', '1234', 'علی فروشنده (صندوق‌دار)', 'POS_USER', '', 1, 1700000000000),
+                    (3, 'visitor', '1234', 'رضا ویزیتور (بازاریاب)', 'VISITOR', '', 1, 1700000000000)
                 """.trimIndent())
             }
         }

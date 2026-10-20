@@ -215,7 +215,8 @@ fun SettingsScreen(
                     2 -> {
                         // Currency Management Tab
                         CurrencyManagementSection(
-                            securityManager = securityManager
+                            securityManager = securityManager,
+                            db = db
                         )
                     }
                     3 -> {

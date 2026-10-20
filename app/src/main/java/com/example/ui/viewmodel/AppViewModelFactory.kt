@@ -19,7 +19,7 @@ class AppViewModelFactory(
     }
 
     val accountingRepository: AccountingRepository by lazy {
-        AccountingRepository(database.accountingDao())
+        AccountingRepository(database.accountingDao(), appDatabase = database)
     }
 
     val inventoryRepository: InventoryRepository by lazy {

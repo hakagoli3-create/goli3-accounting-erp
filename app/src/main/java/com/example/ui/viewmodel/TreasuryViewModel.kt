@@ -584,58 +584,58 @@ class TreasuryViewModel(
                 _statusMessage.value = "مبلغ انتقال باید بیشتر از صفر باشد."
                 return@launch
             }
-            if (fromType == "CASH") repository.updateCashBalance(fromId, -amount)
-            else repository.updateBankBalance(fromId, -amount)
+            try {
+                repository.transferBetweenAccounts(fromType, fromId, toType, toId, amount)
 
-            if (toType == "CASH") repository.updateCashBalance(toId, amount)
-            else repository.updateBankBalance(toId, amount)
+                val fromName = if (fromType == "CASH") {
+                    allCashDesks.value.firstOrNull { it.id == fromId }?.name ?: "صندوق"
+                } else {
+                    allBankAccounts.value.firstOrNull { it.id == fromId }?.bankName ?: "بانک"
+                }
 
-            val fromName = if (fromType == "CASH") {
-                allCashDesks.value.firstOrNull { it.id == fromId }?.name ?: "صندوق"
-            } else {
-                allBankAccounts.value.firstOrNull { it.id == fromId }?.bankName ?: "بانک"
-            }
+                val toName = if (toType == "CASH") {
+                    allCashDesks.value.firstOrNull { it.id == toId }?.name ?: "صندوق"
+                } else {
+                    allBankAccounts.value.firstOrNull { it.id == toId }?.bankName ?: "بانک"
+                }
 
-            val toName = if (toType == "CASH") {
-                allCashDesks.value.firstOrNull { it.id == toId }?.name ?: "صندوق"
-            } else {
-                allBankAccounts.value.firstOrNull { it.id == toId }?.bankName ?: "بانک"
-            }
+                val today = JalaliDate.now()
+                val fromSub = if (fromType == "CASH") 10101 else 10102
+                val toSub = if (toType == "CASH") 10101 else 10102
 
-            val today = JalaliDate.now()
-            val fromSub = if (fromType == "CASH") 10101 else 10102
-            val toSub = if (toType == "CASH") 10101 else 10102
-
-            val journalItems = listOf(
-                JournalItemEntity(
-                    voucherId = 0L,
-                    generalCode = 101,
-                    subsidiaryCode = toSub,
-                    description = "انتقال وجه وارده به $toName بابت جابجایی از $fromName",
-                    debit = amount,
-                    credit = 0L
-                ),
-                JournalItemEntity(
-                    voucherId = 0L,
-                    generalCode = 101,
-                    subsidiaryCode = fromSub,
-                    description = "خروج وجه از $fromName بابت انتقال به $toName",
-                    debit = 0L,
-                    credit = amount
+                val journalItems = listOf(
+                    JournalItemEntity(
+                        voucherId = 0L,
+                        generalCode = 101,
+                        subsidiaryCode = toSub,
+                        description = "انتقال وجه وارده به $toName بابت جابجایی از $fromName",
+                        debit = amount,
+                        credit = 0L
+                    ),
+                    JournalItemEntity(
+                        voucherId = 0L,
+                        generalCode = 101,
+                        subsidiaryCode = fromSub,
+                        description = "خروج وجه از $fromName بابت انتقال به $toName",
+                        debit = 0L,
+                        credit = amount
+                    )
                 )
-            )
-            accountingRepo.createJournalVoucher(
-                JournalEntryEntity(
-                    voucherNumber = 0L,
-                    jalaliDate = today.toStandardString(),
-                    description = "انتقال وجه بین حساب‌ها: از $fromName به $toName ${notes.ifBlank { "" }}",
-                    isBalanced = true,
-                    status = "FINAL"
-                ),
-                journalItems
-            )
-            _statusMessage.value = "انتقال وجه مبلغ ${NumberFormatUtils.formatPrice(amount)} با موفقیت انجام شد."
-            onSuccess()
+                accountingRepo.createJournalVoucher(
+                    JournalEntryEntity(
+                        voucherNumber = 0L,
+                        jalaliDate = today.toStandardString(),
+                        description = "انتقال وجه بین حساب‌ها: از $fromName به $toName ${notes.ifBlank { "" }}",
+                        isBalanced = true,
+                        status = "FINAL"
+                    ),
+                    journalItems
+                )
+                _statusMessage.value = "انتقال وجه مبلغ ${NumberFormatUtils.formatPrice(amount)} با موفقیت انجام شد."
+                onSuccess()
+            } catch (e: Exception) {
+                _statusMessage.value = "خطا در انتقال وجه: ${e.localizedMessage}"
+            }
         }
     }
 

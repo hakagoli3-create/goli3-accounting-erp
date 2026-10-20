@@ -1,6 +1,9 @@
 package com.example.data.repository
 
+import androidx.room.withTransaction
 import com.example.data.dao.AccountingDao
+import com.example.data.dao.PartyDao
+import com.example.data.database.AppDatabase
 import com.example.data.model.AccountGroupEntity
 import com.example.data.model.GeneralAccountEntity
 import com.example.data.model.JournalEntryEntity
@@ -10,7 +13,21 @@ import com.example.data.model.TrialBalanceRow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 
-class AccountingRepository(private val dao: AccountingDao) {
+/**
+ * مخزن مدیریت حسابداری مالی چندسطحی، اسناد دوبل و دفاتر حسابداری
+ */
+class AccountingRepository(
+    private val dao: AccountingDao,
+    private val appDatabase: AppDatabase? = null
+) {
+
+    private suspend fun <T> runInTransaction(block: suspend () -> T): T {
+        return if (appDatabase != null) {
+            appDatabase.withTransaction { block() }
+        } else {
+            block()
+        }
+    }
 
     val allGroups: Flow<List<AccountGroupEntity>> = dao.getAllAccountGroups()
     val allGenerals: Flow<List<GeneralAccountEntity>> = dao.getAllGeneralAccounts()
@@ -51,7 +68,9 @@ class AccountingRepository(private val dao: AccountingDao) {
             return Result.failure(IllegalArgumentException("سند باید حداقل شامل ۲ سطر آرتیکل باشد."))
         }
 
-        val voucherId = dao.createVoucherWithItems(entry.copy(isBalanced = true), items)
+        val voucherId = runInTransaction {
+            dao.createVoucherWithItems(entry.copy(isBalanced = true), items)
+        }
         return Result.success(voucherId)
     }
 
@@ -92,15 +111,15 @@ class AccountingRepository(private val dao: AccountingDao) {
         }.filter { it.totalDebit > 0 || it.totalCredit > 0 }
     }
 
-    suspend fun voidVoucher(voucherId: Long) {
+    suspend fun voidVoucher(voucherId: Long) = runInTransaction {
         dao.voidJournalEntry(voucherId)
     }
 
-    suspend fun updateVoucher(entry: JournalEntryEntity) {
+    suspend fun updateVoucher(entry: JournalEntryEntity) = runInTransaction {
         dao.updateJournalEntry(entry)
     }
 
-    suspend fun deleteVoucher(voucherId: Long) {
+    suspend fun deleteVoucher(voucherId: Long) = runInTransaction {
         val entry = dao.getJournalEntryById(voucherId)
         if (entry != null) {
             dao.deleteJournalItemsByVoucher(voucherId)
@@ -108,24 +127,28 @@ class AccountingRepository(private val dao: AccountingDao) {
         }
     }
 
-    suspend fun updateJournalItem(item: JournalItemEntity) {
+    suspend fun updateJournalItem(item: JournalItemEntity) = runInTransaction {
         dao.updateJournalItem(item)
     }
 
-    suspend fun deleteJournalItem(itemId: Long) {
+    suspend fun deleteJournalItem(itemId: Long) = runInTransaction {
         val item = dao.getJournalItemById(itemId)
         if (item != null) {
             dao.deleteJournalItem(item)
         }
     }
 
+    /**
+     * ثبت گردش حساب شخص در دفتر معین به صورت اتمیک همراه با به‌روزرسانی مانده طرف‌حساب
+     */
     suspend fun addPartyTransaction(
         partyId: Long,
         description: String,
         debit: Long,
         credit: Long,
-        jalaliDate: String
-    ): Long {
+        jalaliDate: String,
+        partyDao: PartyDao? = null
+    ): Long = runInTransaction {
         val nextNumber = dao.getMaxVoucherNumber() + 1
         val voucher = JournalEntryEntity(
             voucherNumber = nextNumber,
@@ -137,7 +160,7 @@ class AccountingRepository(private val dao: AccountingDao) {
         val voucherId = dao.insertJournalEntry(voucher)
         val items = mutableListOf<JournalItemEntity>()
 
-        // ردیف معین شخص
+        // ردیف معین شخص (حساب‌های دریافتنی)
         items.add(
             JournalItemEntity(
                 voucherId = voucherId,
@@ -164,7 +187,40 @@ class AccountingRepository(private val dao: AccountingDao) {
         )
 
         dao.insertJournalItems(items)
-        return voucherId
+
+        if (partyDao != null) {
+            val netEffect = debit - credit
+            partyDao.updatePartyBalance(partyId, netEffect)
+        }
+
+        voucherId
+    }
+
+    suspend fun updatePartyTransaction(
+        item: JournalItemEntity,
+        newDescription: String,
+        newDebit: Long,
+        newCredit: Long,
+        partyDao: PartyDao? = null
+    ) = runInTransaction {
+        val oldNet = item.debit - item.credit
+        val newNet = newDebit - newCredit
+        val diff = newNet - oldNet
+        dao.updateJournalItem(item.copy(description = newDescription, debit = newDebit, credit = newCredit))
+        if (partyDao != null && item.partyId != null && diff != 0L) {
+            partyDao.updatePartyBalance(item.partyId, diff)
+        }
+    }
+
+    suspend fun deletePartyTransaction(
+        item: JournalItemEntity,
+        partyDao: PartyDao? = null
+    ) = runInTransaction {
+        dao.deleteJournalItem(item)
+        if (partyDao != null && item.partyId != null) {
+            val reverse = -(item.debit - item.credit)
+            partyDao.updatePartyBalance(item.partyId, reverse)
+        }
     }
 
     fun getJournalItemsByParty(partyId: Long): Flow<List<JournalItemEntity>> =

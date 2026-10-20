@@ -91,14 +91,35 @@ class InvoiceRepository(
             inventoryDao.adjustStock(item.productId, stockDelta)
         }
 
-        // 2. مقادیر بر مبنای نرخ تسعیر ذخیره‌شده فاکتور
+        // 2. مقادیر بر مبنای نرخ تسعیر ذخیره‌شده فاکتور با دقت محاسباتی بالا (BigDecimal)
         val rate = if (invoice.currencyRateToBase > 0) invoice.currencyRateToBase else 1.0
+        fun toBase(amount: Long): Long {
+            if (rate == 1.0 || amount == 0L) return amount
+            return java.math.BigDecimal(amount)
+                .multiply(java.math.BigDecimal.valueOf(rate))
+                .setScale(0, java.math.RoundingMode.HALF_UP)
+                .toLong()
+        }
+
         val creditAmount = if (invoice.paymentType == "CREDIT") invoice.totalAmount else invoice.creditAmount
-        val creditInBase = if (invoice.creditAmountInBase > 0) invoice.creditAmountInBase else (creditAmount * rate).toLong()
-        val cashInBase = if (invoice.cashAmountInBase > 0) invoice.cashAmountInBase else (invoice.cashAmount * rate).toLong()
-        val posInBase = if (invoice.posAmountInBase > 0) invoice.posAmountInBase else (invoice.posAmount * rate).toLong()
-        val chequeInBase = if (invoice.chequeAmountInBase > 0) invoice.chequeAmountInBase else (invoice.chequeAmount * rate).toLong()
-        val totalInBase = if (invoice.totalAmountInBase > 0) invoice.totalAmountInBase else (invoice.totalAmount * rate).toLong()
+        var creditInBase = if (invoice.creditAmountInBase > 0) invoice.creditAmountInBase else toBase(creditAmount)
+        var cashInBase = if (invoice.cashAmountInBase > 0) invoice.cashAmountInBase else toBase(invoice.cashAmount)
+        var posInBase = if (invoice.posAmountInBase > 0) invoice.posAmountInBase else toBase(invoice.posAmount)
+        var chequeInBase = if (invoice.chequeAmountInBase > 0) invoice.chequeAmountInBase else toBase(invoice.chequeAmount)
+        val totalInBase = if (invoice.totalAmountInBase > 0) invoice.totalAmountInBase else toBase(invoice.totalAmount)
+
+        // توازن دقیق ریاضی مجموع اجزای پرداخت با مبلغ کل فاکتور در ارز پایه
+        val paymentSum = cashInBase + posInBase + chequeInBase + creditInBase
+        val roundingDiff = totalInBase - paymentSum
+        if (roundingDiff != 0L) {
+            when {
+                creditInBase > 0 -> creditInBase += roundingDiff
+                posInBase > 0 -> posInBase += roundingDiff
+                cashInBase > 0 -> cashInBase += roundingDiff
+                chequeInBase > 0 -> chequeInBase += roundingDiff
+                else -> cashInBase += roundingDiff
+            }
+        }
 
         val currencyNote = if (invoice.currencyCode != "TOMAN" && rate != 1.0) {
             " (${invoice.totalAmount} ${invoice.currencyCode} - نرخ تسعیر: ${rate.toLong()} تومان)"
@@ -385,12 +406,19 @@ class InvoiceRepository(
             }
         }
 
-        // 2. معکوس کردن مانده حساب طرف‌حساب با در نظر گرفتن نرخ تسعیر
+        // 2. معکوس کردن مانده حساب طرف‌حساب با در نظر گرفتن نرخ تسعیر با دقت بالا
         val rate = if (invoice.currencyRateToBase > 0) invoice.currencyRateToBase else 1.0
+        fun toBase(amount: Long): Long {
+            if (rate == 1.0 || amount == 0L) return amount
+            return java.math.BigDecimal(amount)
+                .multiply(java.math.BigDecimal.valueOf(rate))
+                .setScale(0, java.math.RoundingMode.HALF_UP)
+                .toLong()
+        }
         val creditAmount = if (invoice.paymentType == "CREDIT") invoice.totalAmount else invoice.creditAmount
-        val creditInBase = if (invoice.creditAmountInBase > 0) invoice.creditAmountInBase else (creditAmount * rate).toLong()
-        val cashInBase = if (invoice.cashAmountInBase > 0) invoice.cashAmountInBase else (invoice.cashAmount * rate).toLong()
-        val posInBase = if (invoice.posAmountInBase > 0) invoice.posAmountInBase else (invoice.posAmount * rate).toLong()
+        val creditInBase = if (invoice.creditAmountInBase > 0) invoice.creditAmountInBase else toBase(creditAmount)
+        val cashInBase = if (invoice.cashAmountInBase > 0) invoice.cashAmountInBase else toBase(invoice.cashAmount)
+        val posInBase = if (invoice.posAmountInBase > 0) invoice.posAmountInBase else toBase(invoice.posAmount)
 
         try {
             if (invoice.partyId != null && creditInBase > 0) {
