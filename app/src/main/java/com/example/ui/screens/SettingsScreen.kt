@@ -1148,6 +1148,25 @@ private fun StoreProfileSection(
             }
 
             Spacer(modifier = Modifier.height(10.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = uiState.economicCode,
+                    onValueChange = { viewModel.onEconomicCodeChange(it) },
+                    label = { Text("کد اقتصادی") },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                OutlinedTextField(
+                    value = uiState.wholesaleDiscountLimit,
+                    onValueChange = { viewModel.onWholesaleDiscountLimitChange(it) },
+                    label = { Text("سقف تخفیف مجاز (درصد)") },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
             OutlinedTextField(
                 value = uiState.address,
                 onValueChange = { viewModel.onAddressChange(it) },

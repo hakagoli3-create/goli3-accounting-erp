@@ -66,6 +66,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -111,7 +112,7 @@ fun CurrencyManagementSection(
     val invoices by database.invoiceDao().getAllInvoicesWithItems().collectAsStateWithLifecycle(initialValue = emptyList())
 
     // Sub-tab: 0 = Currency List, 1 = Exchange Rates Panel
-    var selectedSubTab by remember { mutableIntStateOf(1) }
+    var selectedSubTab by rememberSaveable { mutableIntStateOf(1) }
 
     var showAddCurrencyDialog by remember { mutableStateOf(false) }
     var editingCurrency by remember { mutableStateOf<CurrencyItem?>(null) }

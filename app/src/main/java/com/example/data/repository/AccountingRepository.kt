@@ -207,6 +207,23 @@ class AccountingRepository(
         val newNet = newDebit - newCredit
         val diff = newNet - oldNet
         dao.updateJournalItem(item.copy(description = newDescription, debit = newDebit, credit = newCredit))
+
+        // به‌روزرسانی آرتیکل متقابل جهت حفظ توازن دقیق دوبل حسابداری (Debit = Credit)
+        val voucherId = item.voucherId
+        val voucherItems = dao.getJournalItemsByVoucherSync(voucherId)
+        if (voucherItems.size == 2) {
+            val counterItem = voucherItems.firstOrNull { it.id != item.id }
+            if (counterItem != null) {
+                dao.updateJournalItem(
+                    counterItem.copy(
+                        description = "طرف مقابل سند معین: $newDescription",
+                        debit = newCredit,
+                        credit = newDebit
+                    )
+                )
+            }
+        }
+
         if (partyDao != null && item.partyId != null && diff != 0L) {
             partyDao.updatePartyBalance(item.partyId, diff)
         }
@@ -216,7 +233,15 @@ class AccountingRepository(
         item: JournalItemEntity,
         partyDao: PartyDao? = null
     ) = runInTransaction {
-        dao.deleteJournalItem(item)
+        val voucherId = item.voucherId
+        val voucherItems = dao.getJournalItemsByVoucherSync(voucherId)
+        if (voucherItems.size <= 2 && voucherItems.any { it.partyId == item.partyId }) {
+            // حذف کامل سند و تمام آرتیکل‌های مرتبط با آن
+            dao.deleteJournalItemsByVoucher(voucherId)
+            dao.deleteJournalEntryById(voucherId)
+        } else {
+            dao.deleteJournalItem(item)
+        }
         if (partyDao != null && item.partyId != null) {
             val reverse = -(item.debit - item.credit)
             partyDao.updatePartyBalance(item.partyId, reverse)

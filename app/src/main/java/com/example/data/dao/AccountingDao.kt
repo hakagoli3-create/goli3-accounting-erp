@@ -101,6 +101,9 @@ interface AccountingDao {
     @Query("DELETE FROM journal_items WHERE voucherId = :voucherId")
     suspend fun deleteJournalItemsByVoucher(voucherId: Long)
 
+    @Query("DELETE FROM journal_entries WHERE id = :voucherId")
+    suspend fun deleteJournalEntryById(voucherId: Long)
+
     @Transaction
     suspend fun createVoucherWithItems(
         entry: JournalEntryEntity,
