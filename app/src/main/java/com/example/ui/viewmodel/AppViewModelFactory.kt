@@ -101,6 +101,11 @@ class AppViewModelFactory(
                     treasuryRepo = treasuryRepository
                 ) as T
             }
+            modelClass.isAssignableFrom(SettingsViewModel::class.java) -> {
+                SettingsViewModel(
+                    securityManager = com.example.data.model.AppSecurityAndSettingsManager.getInstance(context)
+                ) as T
+            }
             else -> throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
         }
     }

@@ -153,4 +153,20 @@ class ExampleUnitTest {
         assertEquals(com.example.data.model.UserRole.VISITOR, com.example.data.model.UserRole.fromString("VISITOR"))
         assertEquals(com.example.data.model.UserRole.ADMIN, com.example.data.model.UserRole.fromString("unknown"))
     }
+
+    @Test
+    fun testStoreProfileEmptyDefaults() {
+        val profile = com.example.data.model.StoreProfile()
+        assertEquals("", profile.name)
+        assertEquals("", profile.managerName)
+        assertEquals("", profile.phone)
+        assertEquals("", profile.mobile)
+        assertEquals("", profile.address)
+        assertEquals("", profile.nationalCode)
+        assertEquals("", profile.economicCode)
+        assertEquals("", profile.defaultBankCard)
+        assertEquals("", profile.defaultSheba)
+        assertEquals(10, profile.taxRatePercent)
+        assertEquals(25, profile.wholesaleDiscountLimitPercent)
+    }
 }

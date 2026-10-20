@@ -59,15 +59,15 @@ enum class UserRole(
 }
 
 data class StoreProfile(
-    val name: String = "حسابداری و بازرگانی گلی",
-    val managerName: String = "آقای گلی",
-    val phone: String = "021-88990011",
-    val mobile: String = "09121112233",
-    val address: String = "تهران، بازار بزرگ، سرای امید، پلاک ۴۴",
-    val nationalCode: String = "10103456789",
-    val economicCode: String = "411234567891",
-    val defaultBankCard: String = "6037-9975-1234-5678",
-    val defaultSheba: String = "IR120170000000123456789012",
+    val name: String = "",
+    val managerName: String = "",
+    val phone: String = "",
+    val mobile: String = "",
+    val address: String = "",
+    val nationalCode: String = "",
+    val economicCode: String = "",
+    val defaultBankCard: String = "",
+    val defaultSheba: String = "",
     val taxRatePercent: Int = 10,
     val wholesaleDiscountLimitPercent: Int = 25
 )
@@ -114,15 +114,15 @@ class AppSecurityAndSettingsManager(context: Context) {
 
     private val _storeProfile = MutableStateFlow(
         StoreProfile(
-            name = prefs.getString("store_name", "حسابداری و بازرگانی گلی") ?: "حسابداری و بازرگانی گلی",
-            managerName = prefs.getString("manager_name", "آقای گلی") ?: "آقای گلی",
-            phone = prefs.getString("store_phone", "021-88990011") ?: "021-88990011",
-            mobile = prefs.getString("store_mobile", "09121112233") ?: "09121112233",
-            address = prefs.getString("store_address", "تهران، بازار بزرگ، سرای امید، پلاک ۴۴") ?: "تهران، بازار بزرگ، سرای امید، پلاک ۴۴",
-            nationalCode = prefs.getString("store_national", "10103456789") ?: "10103456789",
-            economicCode = prefs.getString("store_economic", "411234567891") ?: "411234567891",
-            defaultBankCard = prefs.getString("store_card", "6037-9975-1234-5678") ?: "6037-9975-1234-5678",
-            defaultSheba = prefs.getString("store_sheba", "IR120170000000123456789012") ?: "IR120170000000123456789012",
+            name = prefs.getString("store_name", "") ?: "",
+            managerName = prefs.getString("manager_name", "") ?: "",
+            phone = prefs.getString("store_phone", "") ?: "",
+            mobile = prefs.getString("store_mobile", "") ?: "",
+            address = prefs.getString("store_address", "") ?: "",
+            nationalCode = prefs.getString("store_national", "") ?: "",
+            economicCode = prefs.getString("store_economic", "") ?: "",
+            defaultBankCard = prefs.getString("store_card", "") ?: "",
+            defaultSheba = prefs.getString("store_sheba", "") ?: "",
             taxRatePercent = prefs.getInt("tax_rate", 10),
             wholesaleDiscountLimitPercent = prefs.getInt("wholesale_discount_limit", 25)
         )
@@ -264,7 +264,7 @@ class AppSecurityAndSettingsManager(context: Context) {
             .putString("store_sheba", profile.defaultSheba)
             .putInt("tax_rate", profile.taxRatePercent)
             .putInt("wholesale_discount_limit", profile.wholesaleDiscountLimitPercent)
-            .apply()
+            .commit()
     }
 
     fun setSyncStatus(status: CloudSyncStatus, time: String? = null) {

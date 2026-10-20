@@ -90,6 +90,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ui.viewmodel.SettingsViewModel
 import com.example.data.database.AppDatabase
 import com.example.data.model.AppSecurityAndSettingsManager
 import com.example.data.model.CloudSyncStatus
@@ -109,7 +111,15 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(
     securityManager: AppSecurityAndSettingsManager,
     isDarkTheme: Boolean,
-    onToggleDarkTheme: (Boolean) -> Unit
+    onToggleDarkTheme: (Boolean) -> Unit,
+    viewModel: SettingsViewModel = viewModel(
+        factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                return SettingsViewModel(securityManager) as T
+            }
+        }
+    )
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -199,8 +209,7 @@ fun SettingsScreen(
                     1 -> {
                         // Store Profile Tab
                         StoreProfileSection(
-                            storeProfile = storeProfile,
-                            securityManager = securityManager
+                            viewModel = viewModel
                         )
                     }
                     2 -> {
@@ -1072,19 +1081,10 @@ private fun EditUserDialog(
  */
 @Composable
 private fun StoreProfileSection(
-    storeProfile: StoreProfile,
-    securityManager: AppSecurityAndSettingsManager
+    viewModel: SettingsViewModel
 ) {
     val context = LocalContext.current
-    var name by remember(storeProfile) { mutableStateOf(storeProfile.name) }
-    var managerName by remember(storeProfile) { mutableStateOf(storeProfile.managerName) }
-    var phone by remember(storeProfile) { mutableStateOf(storeProfile.phone) }
-    var mobile by remember(storeProfile) { mutableStateOf(storeProfile.mobile) }
-    var address by remember(storeProfile) { mutableStateOf(storeProfile.address) }
-    var nationalCode by remember(storeProfile) { mutableStateOf(storeProfile.nationalCode) }
-    var defaultBankCard by remember(storeProfile) { mutableStateOf(storeProfile.defaultBankCard) }
-    var defaultSheba by remember(storeProfile) { mutableStateOf(storeProfile.defaultSheba) }
-    var taxRate by remember(storeProfile) { mutableStateOf(storeProfile.taxRatePercent.toString()) }
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1101,8 +1101,8 @@ private fun StoreProfileSection(
 
             Spacer(modifier = Modifier.height(14.dp))
             OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
+                value = uiState.name,
+                onValueChange = { viewModel.onNameChange(it) },
                 label = { Text("نام فروشگاه / شرکت بازرگانی") },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp)
@@ -1111,15 +1111,15 @@ private fun StoreProfileSection(
             Spacer(modifier = Modifier.height(10.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
-                    value = managerName,
-                    onValueChange = { managerName = it },
+                    value = uiState.managerName,
+                    onValueChange = { viewModel.onManagerNameChange(it) },
                     label = { Text("نام مدیریت") },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp)
                 )
                 OutlinedTextField(
-                    value = phone,
-                    onValueChange = { phone = it },
+                    value = uiState.phone,
+                    onValueChange = { viewModel.onPhoneChange(it) },
                     label = { Text("تلفن ثابت") },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
@@ -1130,16 +1130,16 @@ private fun StoreProfileSection(
             Spacer(modifier = Modifier.height(10.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
-                    value = mobile,
-                    onValueChange = { mobile = it },
+                    value = uiState.mobile,
+                    onValueChange = { viewModel.onMobileChange(it) },
                     label = { Text("شماره همراه") },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
                 )
                 OutlinedTextField(
-                    value = nationalCode,
-                    onValueChange = { nationalCode = it },
+                    value = uiState.nationalCode,
+                    onValueChange = { viewModel.onNationalCodeChange(it) },
                     label = { Text("شناسه / کد ملی") },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp)
@@ -1148,8 +1148,8 @@ private fun StoreProfileSection(
 
             Spacer(modifier = Modifier.height(10.dp))
             OutlinedTextField(
-                value = address,
-                onValueChange = { address = it },
+                value = uiState.address,
+                onValueChange = { viewModel.onAddressChange(it) },
                 label = { Text("آدرس دقیق فروشگاه و انبار") },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp)
@@ -1157,8 +1157,8 @@ private fun StoreProfileSection(
 
             Spacer(modifier = Modifier.height(10.dp))
             OutlinedTextField(
-                value = defaultBankCard,
-                onValueChange = { defaultBankCard = it },
+                value = uiState.defaultBankCard,
+                onValueChange = { viewModel.onDefaultBankCardChange(it) },
                 label = { Text("شماره کارت واریزی پیش‌فرض (پاورقی فاکتور)") },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
@@ -1167,8 +1167,8 @@ private fun StoreProfileSection(
 
             Spacer(modifier = Modifier.height(10.dp))
             OutlinedTextField(
-                value = defaultSheba,
-                onValueChange = { defaultSheba = it },
+                value = uiState.defaultSheba,
+                onValueChange = { viewModel.onDefaultShebaChange(it) },
                 label = { Text("شماره شبا حساب بانکی") },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp)
@@ -1176,8 +1176,8 @@ private fun StoreProfileSection(
 
             Spacer(modifier = Modifier.height(10.dp))
             OutlinedTextField(
-                value = taxRate,
-                onValueChange = { taxRate = it },
+                value = uiState.taxRate,
+                onValueChange = { viewModel.onTaxRateChange(it) },
                 label = { Text("نرخ مالیات بر ارزش افزوده (درصد)") },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
@@ -1187,18 +1187,7 @@ private fun StoreProfileSection(
             Spacer(modifier = Modifier.height(16.dp))
             Button(
                 onClick = {
-                    val profile = storeProfile.copy(
-                        name = name.ifBlank { "حسابداری و بازرگانی گلی" },
-                        managerName = managerName,
-                        phone = phone,
-                        mobile = mobile,
-                        address = address,
-                        nationalCode = nationalCode,
-                        defaultBankCard = defaultBankCard,
-                        defaultSheba = defaultSheba,
-                        taxRatePercent = taxRate.toIntOrNull() ?: 10
-                    )
-                    securityManager.updateProfile(profile)
+                    viewModel.saveProfile()
                     Toast.makeText(context, "اطلاعات فروشگاه با موفقیت ذخیره شد.", Toast.LENGTH_SHORT).show()
                 },
                 modifier = Modifier

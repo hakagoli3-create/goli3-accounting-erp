@@ -348,7 +348,7 @@ fun OfficialInvoicePrintPreviewDialog(
                                     Text("مشخصات فروشنده", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
                                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                                     Text("نام: ${storeProfile.name}", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                                    Text("شناسه ملی: ${NumberFormatUtils.toPersianDigits(storeProfile.nationalCode.ifBlank { "۱۰۱۰۲۳۴۵۶۷۸" })}", fontSize = 10.sp)
+                                    Text("شناسه ملی: ${NumberFormatUtils.toPersianDigits(storeProfile.nationalCode.ifBlank { "---" })}", fontSize = 10.sp)
                                     Text("تلفن: ${NumberFormatUtils.toPersianDigits(storeProfile.phone)}", fontSize = 10.sp)
                                     Text("نشانی: ${storeProfile.address}", fontSize = 9.sp, maxLines = 2, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }

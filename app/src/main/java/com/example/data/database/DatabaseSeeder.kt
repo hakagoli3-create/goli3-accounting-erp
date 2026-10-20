@@ -261,8 +261,8 @@ object DatabaseSeeder {
 
         // 7. Treasury: Cash Desks & Bank Accounts
         val cashDesks = listOf(
-            CashDeskEntity(1, "CSH-01", "صندوق مرکزی و مدیریت", 32500000L, "آقای گلی", "صندوق اصلی مستقر در اتاق مدیریت"),
-            CashDeskEntity(2, "CSH-02", "دخل فروشگاه و نقدینگی صندوقدار", 8400000L, "خانم کریمی", "دخل روزانه پایانه فروشگاه")
+            CashDeskEntity(1, "CSH-01", "صندوق مرکزی و مدیریت", 32500000L, "مسئول صندوق", "صندوق اصلی مستقر در اتاق مدیریت"),
+            CashDeskEntity(2, "CSH-02", "دخل فروشگاه و نقدینگی صندوقدار", 8400000L, "صندوق‌دار فروشگاه", "دخل روزانه پایانه فروشگاه")
         )
         db.treasuryDao().insertCashDesks(cashDesks)
 
