@@ -1234,7 +1234,9 @@ private fun BackupAndSyncSection(
             scope.launch {
                 val result = DatabaseBackupHelper.restoreDatabaseFromFile(context, uri)
                 if (result.isSuccess) {
-                    Toast.makeText(context, "بازیابی اطلاعات از فایل پشتیبان با موفقیت انجام شد.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "بازیابی اطلاعات با موفقیت انجام شد. در حال بارگذاری مجدد برنامه...", Toast.LENGTH_LONG).show()
+                    kotlinx.coroutines.delay(600)
+                    (context as? android.app.Activity)?.recreate()
                 } else {
                     Toast.makeText(context, "خطا در بازیابی فایل: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
                 }

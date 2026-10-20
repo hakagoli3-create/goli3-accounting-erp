@@ -292,9 +292,23 @@ abstract class AppDatabase : RoomDatabase() {
         fun closeInstance() {
             synchronized(this) {
                 try {
-                    INSTANCE?.close()
-                } catch (_: Exception) {}
-                INSTANCE = null
+                    val currentInstance = INSTANCE
+                    if (currentInstance != null && currentInstance.isOpen) {
+                        try {
+                            val db = currentInstance.openHelper.writableDatabase
+                            val cursor = db.query("PRAGMA wal_checkpoint(TRUNCATE)")
+                            cursor.moveToFirst()
+                            cursor.close()
+                        } catch (e: Exception) {
+                            android.util.Log.w("AppDatabase", "Warning WAL checkpoint before close: ${e.message}")
+                        }
+                        currentInstance.close()
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("AppDatabase", "Error closing Room database instance: ${e.message}", e)
+                } finally {
+                    INSTANCE = null
+                }
             }
         }
 

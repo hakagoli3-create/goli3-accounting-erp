@@ -461,4 +461,25 @@ class DatabaseMigrationTest {
         assertTrue(db.isOpen)
         assertTrue(writable.isOpen)
     }
+
+    @Test
+    fun `test DatabaseBackupHelper createDatabaseBackup and integrity validation`() = kotlinx.coroutines.runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = AppDatabase.getInstance(context)
+        val writable = db.openHelper.writableDatabase
+        assertNotNull(writable)
+
+        val backupResult = com.example.util.DatabaseBackupHelper.createDatabaseBackup(context)
+        assertTrue("Backup creation should succeed", backupResult.isSuccess)
+        val backupFile = backupResult.getOrNull()
+        assertNotNull(backupFile)
+        assertTrue(backupFile!!.exists())
+        assertTrue(backupFile.length() > 0)
+
+        val integrity = com.example.util.DatabaseSecurityManager.verifyDatabaseIntegrity(backupFile)
+        assertTrue(integrity.first)
+
+        val existingBackups = com.example.util.DatabaseBackupHelper.getExistingBackupFiles(context)
+        assertTrue(existingBackups.isNotEmpty())
+    }
 }
