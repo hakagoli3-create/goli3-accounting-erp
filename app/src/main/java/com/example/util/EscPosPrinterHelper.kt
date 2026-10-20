@@ -37,7 +37,8 @@ object EscPosPrinterHelper {
         val paymentMethod: String,
         val directExpenseAmount: Long = 0L,
         val directExpenseType: String = "",
-        val note: String = ""
+        val note: String = "",
+        val invoiceType: String = "SALE"
     )
 
     data class PrintableItem(
@@ -61,17 +62,29 @@ object EscPosPrinterHelper {
         stream.write("مدیریت حسابداری گلی\n".toByteArray(Charset.forName("UTF-8")))
         stream.write(CMD_NORMAL_SIZE)
         stream.write(CMD_BOLD_OFF)
-        stream.write("فاکتور رسمی فروش\n".toByteArray(Charset.forName("UTF-8")))
+        val docTitle = when (invoice.invoiceType) {
+            "PURCHASE" -> "فاکتور رسمی خرید"
+            "RETURN_SALE" -> "فاکتور برگشت از فروش"
+            "RETURN_PURCHASE" -> "فاکتور برگشت از خرید"
+            else -> "فاکتور رسمی فروش"
+        }
+        val partyLabel = when (invoice.invoiceType) {
+            "PURCHASE" -> "تأمین‌کننده / فروشنده"
+            "RETURN_PURCHASE" -> "تأمین‌کننده"
+            "RETURN_SALE" -> "خریدار / مرجوع‌کننده"
+            else -> "مشتری / خریدار"
+        }
+        stream.write("$docTitle\n".toByteArray(Charset.forName("UTF-8")))
         stream.write(makeDivider(printerWidthChars).toByteArray(Charset.forName("UTF-8")))
 
         stream.write(CMD_ALIGN_RIGHT)
         stream.write("شماره فاکتور: ${invoice.invoiceNumber}\n".toByteArray(Charset.forName("UTF-8")))
         stream.write("تاریخ: ${invoice.invoiceDate}\n".toByteArray(Charset.forName("UTF-8")))
-        stream.write("مشتری: ${invoice.customerName}\n".toByteArray(Charset.forName("UTF-8")))
+        stream.write("$partyLabel: ${invoice.customerName}\n".toByteArray(Charset.forName("UTF-8")))
         if (invoice.customerPhone.isNotBlank()) {
             stream.write("تلفن: ${invoice.customerPhone}\n".toByteArray(Charset.forName("UTF-8")))
         }
-        stream.write("انبار مبدا: ${invoice.warehouseName}\n".toByteArray(Charset.forName("UTF-8")))
+        stream.write("انبار: ${invoice.warehouseName}\n".toByteArray(Charset.forName("UTF-8")))
         stream.write(makeDivider(printerWidthChars).toByteArray(Charset.forName("UTF-8")))
 
         // Item Header
@@ -124,13 +137,25 @@ object EscPosPrinterHelper {
      */
     fun buildPlainTextReceipt(invoice: PrintableInvoice): String {
         val sb = StringBuilder()
+        val docTitle = when (invoice.invoiceType) {
+            "PURCHASE" -> "فاکتور رسمی خرید"
+            "RETURN_SALE" -> "فاکتور برگشت از فروش"
+            "RETURN_PURCHASE" -> "فاکتور برگشت از خرید"
+            else -> "فاکتور رسمی فروش"
+        }
+        val partyLabel = when (invoice.invoiceType) {
+            "PURCHASE" -> "تأمین‌کننده"
+            "RETURN_PURCHASE" -> "تأمین‌کننده"
+            "RETURN_SALE" -> "مرجوع‌کننده"
+            else -> "خریدار    "
+        }
         sb.appendLine("==========================================")
         sb.appendLine("            مدیریت حسابداری گلی           ")
-        sb.appendLine("             فاکتور رسمی فروش             ")
+        sb.appendLine(docTitle.centerIn(42))
         sb.appendLine("==========================================")
         sb.appendLine("شماره فاکتور: ${NumberFormatUtils.formatInvoiceNumber(invoice.invoiceNumber)}")
         sb.appendLine("تاریخ صدور : ${NumberFormatUtils.toPersianDigits(invoice.invoiceDate)}")
-        sb.appendLine("خریدار     : ${invoice.customerName}")
+        sb.appendLine("$partyLabel : ${invoice.customerName}")
         if (invoice.customerPhone.isNotBlank()) {
             sb.appendLine("شماره تماس : ${NumberFormatUtils.toPersianDigits(invoice.customerPhone)}")
         }
@@ -175,5 +200,13 @@ object EscPosPrinterHelper {
 
     private fun makeDivider(width: Int, char: Char = '='): String {
         return char.toString().repeat(width) + "\n"
+    }
+
+    private fun String.centerIn(width: Int): String {
+        if (this.length >= width) return this
+        val totalPad = width - this.length
+        val leftPad = totalPad / 2
+        val rightPad = totalPad - leftPad
+        return " ".repeat(leftPad) + this + " ".repeat(rightPad)
     }
 }

@@ -83,6 +83,12 @@ fun OfficialInvoiceDetailsDialog(
                     .verticalScroll(rememberScrollState())
             ) {
                 // Top Header
+                val detailsDocTitle = when (inv.invoiceType) {
+                    "PURCHASE" -> "صورتحساب رسمی خرید کالا و خدمات"
+                    "RETURN_SALE" -> "صورتحساب رسمی برگشت از فروش کالا و خدمات"
+                    "RETURN_PURCHASE" -> "صورتحساب رسمی برگشت از خرید کالا و خدمات"
+                    else -> "صورتحساب رسمی فروش کالا و خدمات"
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -90,7 +96,7 @@ fun OfficialInvoiceDetailsDialog(
                 ) {
                     Column {
                         Text(
-                            text = "صورتحساب رسمی فروش کالا و خدمات",
+                            text = detailsDocTitle,
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                         )
                         Text(
@@ -171,21 +177,36 @@ fun OfficialInvoiceDetailsDialog(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // Seller & Buyer Box
+                val isPurchaseDetails = inv.invoiceType in listOf("PURCHASE", "RETURN_PURCHASE")
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("فروشنده: ${storeProfile.name}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            Text("تلفن: ${storeProfile.phone}", fontSize = 12.sp)
-                        }
-                        Text("آدرس: ${storeProfile.address}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("خریدار: ${inv.partyName}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            Text("تماس: ${inv.partyPhone.ifEmpty { "نقدی" }}", fontSize = 12.sp)
+                        if (isPurchaseDetails) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("فروشنده (تأمین‌کننده): ${inv.partyName}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text("تماس: ${inv.partyPhone.ifEmpty { "---" }}", fontSize = 12.sp)
+                            }
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("خریدار: ${storeProfile.name}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text("تلفن: ${storeProfile.phone}", fontSize = 12.sp)
+                            }
+                            Text("آدرس: ${storeProfile.address}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        } else {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("فروشنده: ${storeProfile.name}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text("تلفن: ${storeProfile.phone}", fontSize = 12.sp)
+                            }
+                            Text("آدرس: ${storeProfile.address}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                            val buyerTitle = if (inv.invoiceType == "RETURN_SALE") "مرجوع‌کننده / خریدار" else "خریدار"
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("$buyerTitle: ${inv.partyName}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text("تماس: ${inv.partyPhone.ifEmpty { "نقدی" }}", fontSize = 12.sp)
+                            }
                         }
                     }
                 }

@@ -75,6 +75,7 @@ fun InvoiceSettlementDialog(
     currencyCode: String = "TOMAN",
     currencySymbol: String = "تومان",
     currencyRateToBase: Double = 1.0,
+    invoiceType: String = "SALE",
     onDismiss: () -> Unit,
     onConfirmSettlement: (
         paymentType: String,
@@ -173,6 +174,12 @@ fun InvoiceSettlementDialog(
                     .verticalScroll(rememberScrollState())
             ) {
                 // Header
+                val settlementTitle = when (invoiceType) {
+                    "PURCHASE" -> "تسویه و پرداخت فاکتور خرید"
+                    "RETURN_SALE" -> "استرداد وجه و تسویه مرجوعی فروش"
+                    "RETURN_PURCHASE" -> "دریافت وجه و تسویه مرجوعی خرید"
+                    else -> "تسویه و دریافت وجه فاکتور فروش"
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -180,7 +187,7 @@ fun InvoiceSettlementDialog(
                 ) {
                     Column {
                         Text(
-                            text = "تسویه و پرداخت فاکتور",
+                            text = settlementTitle,
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                         )
                         Text(
@@ -234,6 +241,10 @@ fun InvoiceSettlementDialog(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 // Detailed Inputs for Cash / Bank / Cheque / Credit
+                val isPurchaseOrReturnSale = invoiceType in listOf("PURCHASE", "RETURN_SALE")
+                val isPurchaseOrReturnPurchase = invoiceType in listOf("PURCHASE", "RETURN_PURCHASE")
+                val partyRoleName = if (isPurchaseOrReturnPurchase) "تأمین‌کننده" else "مشتری"
+
                 if (mode == "MIXED" || mode == "CASH") {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
@@ -241,7 +252,8 @@ fun InvoiceSettlementDialog(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                     ) {
                         Column(modifier = Modifier.padding(10.dp)) {
-                            Text("واریز نقدی به صندوق", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            val cashTitle = if (isPurchaseOrReturnSale) "پرداخت نقدی از صندوق به طرف حساب" else "واریز نقدی مشتری به صندوق"
+                            Text(cashTitle, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                             Spacer(modifier = Modifier.height(6.dp))
                             if (mode == "MIXED") {
                                 OutlinedTextField(
@@ -259,11 +271,12 @@ fun InvoiceSettlementDialog(
                                 onExpandedChange = { cashDeskExpanded = it }
                             ) {
                                 val currentDesk = cashDesks.find { it.id == selectedCashDeskId } ?: cashDesks.firstOrNull()
+                                val deskLabel = if (isPurchaseOrReturnSale) "صندوق پرداخت‌کننده" else "صندوق مقصد"
                                 OutlinedTextField(
                                     value = currentDesk?.name ?: "انتخاب صندوق",
                                     onValueChange = {},
                                     readOnly = true,
-                                    label = { Text("صندوق مقصد") },
+                                    label = { Text(deskLabel) },
                                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = cashDeskExpanded) },
                                     modifier = Modifier.menuAnchor().fillMaxWidth()
                                 )
@@ -294,7 +307,8 @@ fun InvoiceSettlementDialog(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                     ) {
                         Column(modifier = Modifier.padding(10.dp)) {
-                            Text("پرداخت از طریق کارتخوان / بانک", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            val posTitle = if (isPurchaseOrReturnSale) "پرداخت از حساب بانکی به طرف‌حساب" else "دریافت از طریق کارتخوان / بانک"
+                            Text(posTitle, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                             Spacer(modifier = Modifier.height(6.dp))
                             if (mode == "MIXED") {
                                 OutlinedTextField(
@@ -312,11 +326,12 @@ fun InvoiceSettlementDialog(
                                 onExpandedChange = { bankAccountExpanded = it }
                             ) {
                                 val currentBank = bankAccounts.find { it.id == selectedBankAccountId } ?: bankAccounts.firstOrNull()
+                                val bankLabel = if (isPurchaseOrReturnSale) "حساب بانکی پرداخت‌کننده" else "حساب بانکی / پایانه پوز"
                                 OutlinedTextField(
                                     value = currentBank?.bankName ?: "انتخاب حساب بانکی",
                                     onValueChange = {},
                                     readOnly = true,
-                                    label = { Text("حساب بانکی / پایانه پوز") },
+                                    label = { Text(bankLabel) },
                                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = bankAccountExpanded) },
                                     modifier = Modifier.menuAnchor().fillMaxWidth()
                                 )
@@ -347,7 +362,8 @@ fun InvoiceSettlementDialog(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                     ) {
                         Column(modifier = Modifier.padding(10.dp)) {
-                            Text("اطلاعات چک صیادی", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            val chkTitle = if (isPurchaseOrReturnSale) "اطلاعات چک صیادی پرداختی به طرف حساب" else "اطلاعات چک صیادی دریافتی از طرف حساب"
+                            Text(chkTitle, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                             Spacer(modifier = Modifier.height(6.dp))
                             if (mode == "MIXED") {
                                 OutlinedTextField(
@@ -363,10 +379,11 @@ fun InvoiceSettlementDialog(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
+                                val chkNumLabel = if (isPurchaseOrReturnSale) "شماره چک پرداختی" else "شماره سریال چک"
                                 OutlinedTextField(
                                     value = chequeNumber,
                                     onValueChange = { chequeNumber = it },
-                                    label = { Text("شماره سریال چک") },
+                                    label = { Text(chkNumLabel) },
                                     modifier = Modifier.weight(1f)
                                 )
                                 OutlinedTextField(
@@ -388,10 +405,11 @@ fun InvoiceSettlementDialog(
                                     label = { Text("سررسید (۱۴۰۵/۰۲/۱۵)") },
                                     modifier = Modifier.weight(1f)
                                 )
+                                val chkBankLabel = if (isPurchaseOrReturnSale) "بانک پرداخت‌کننده (حساب ما)" else "نام بانک صادرکننده چک"
                                 OutlinedTextField(
                                     value = chequeBankName,
                                     onValueChange = { chequeBankName = it },
-                                    label = { Text("نام بانک صادرکننده") },
+                                    label = { Text(chkBankLabel) },
                                     modifier = Modifier.weight(1f)
                                 )
                             }
@@ -409,18 +427,20 @@ fun InvoiceSettlementDialog(
                         )
                     ) {
                         Column(modifier = Modifier.padding(10.dp)) {
-                            Text("فروش نسیه و مانده حساب مشتری", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            val creditSectionTitle = if (isPurchaseOrReturnPurchase) "خرید نسیه و مانده بدهی به تأمین‌کننده" else "فروش نسیه و مانده حساب مشتری"
+                            Text(creditSectionTitle, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                             Spacer(modifier = Modifier.height(6.dp))
                             if (selectedParty == null) {
                                 Text(
-                                    text = "توجه: برای ثبت نسیه، حتماً باید یک مشتری از لیست CRM انتخاب شده باشد.",
+                                    text = "توجه: برای ثبت نسیه، حتماً باید یک $partyRoleName از لیست انتخاب شده باشد.",
                                     color = AccountingCreditRed,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                             } else {
+                                val creditLimitText = if (isPurchaseOrReturnPurchase) "" else " | سقف اعتبار: ${NumberFormatUtils.formatPrice(selectedParty.creditLimit)}"
                                 Text(
-                                    text = "مشتری: ${selectedParty.name} | سقف اعتبار: ${NumberFormatUtils.formatPrice(selectedParty.creditLimit)} | بدهی فعلی: ${NumberFormatUtils.formatPrice(selectedParty.currentBalance)}",
+                                    text = "$partyRoleName: ${selectedParty.name}$creditLimitText | مانده حساب: ${NumberFormatUtils.formatPrice(selectedParty.currentBalance)}",
                                     fontSize = 11.sp
                                 )
                             }
@@ -477,10 +497,10 @@ fun InvoiceSettlementDialog(
                     onClick = {
                         if (mode == "CREDIT" || (mode == "MIXED" && creditVal > 0)) {
                             if (selectedParty == null) {
-                                Toast.makeText(context, "لطفاً ابتدا مشتری را برای فروش نسیه انتخاب کنید.", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "لطفاً ابتدا $partyRoleName را برای ثبت نسیه انتخاب کنید.", Toast.LENGTH_SHORT).show()
                                 return@Button
                             }
-                            if (!selectedParty.canAcceptCredit(creditVal)) {
+                            if (!isPurchaseOrReturnPurchase && selectedParty.partyType != "SUPPLIER" && !selectedParty.canAcceptCredit(creditVal)) {
                                 Toast.makeText(context, "مبلغ نسیه از سقف اعتبار مشتری فراتر است!", Toast.LENGTH_SHORT).show()
                                 return@Button
                             }

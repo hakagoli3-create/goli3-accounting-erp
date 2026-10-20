@@ -139,7 +139,13 @@ object ExportHelper {
             textPaint.color = Color.WHITE
             textPaint.textSize = 15f
             textPaint.isFakeBoldText = true
-            drawTextRtl(canvas, textPaint, "صورتحساب رسمی فروش کالا و خدمات", (pageWidth - 40).toFloat(), 50f)
+            val pdfDocTitle = when (invoice.invoiceType) {
+                "PURCHASE" -> "صورتحساب رسمی خرید کالا و خدمات"
+                "RETURN_SALE" -> "صورتحساب رسمی برگشت از فروش کالا و خدمات"
+                "RETURN_PURCHASE" -> "صورتحساب رسمی برگشت از خرید کالا و خدمات"
+                else -> "صورتحساب رسمی فروش کالا و خدمات"
+            }
+            drawTextRtl(canvas, textPaint, pdfDocTitle, (pageWidth - 40).toFloat(), 50f)
 
             textPaint.textSize = 10f
             textPaint.isFakeBoldText = false
@@ -164,14 +170,25 @@ object ExportHelper {
 
             textPaint.color = Color.rgb(25, 28, 33)
             textPaint.textSize = 9f
-            textPaint.isFakeBoldText = true
-            drawTextRtl(canvas, textPaint, "فروشنده: ${storeProfile.name} | تلفن: ${storeProfile.phone}", (pageWidth - 30).toFloat(), y + 18f)
-            textPaint.isFakeBoldText = false
-            drawTextRtl(canvas, textPaint, "آدرس: ${storeProfile.address} | شناسه ملی: ${storeProfile.nationalCode}", (pageWidth - 30).toFloat(), y + 33f)
-
-            textPaint.isFakeBoldText = true
             val buyerPayDesc = NumberFormatUtils.formatPaymentType(invoice.paymentType)
-            drawTextRtl(canvas, textPaint, "خریدار: ${invoice.partyName} | تماس: ${invoice.partyPhone.ifEmpty { "نقدی" }} | تسویه: $buyerPayDesc", (pageWidth - 30).toFloat(), y + 50f)
+
+            if (invoice.invoiceType in listOf("PURCHASE", "RETURN_PURCHASE")) {
+                // For Purchase: Seller is the Supplier (party), Buyer is our Store
+                textPaint.isFakeBoldText = true
+                drawTextRtl(canvas, textPaint, "فروشنده (تأمین‌کننده): ${invoice.partyName} | تماس: ${invoice.partyPhone.ifEmpty { "نقدی" }}", (pageWidth - 30).toFloat(), y + 18f)
+                textPaint.isFakeBoldText = false
+                drawTextRtl(canvas, textPaint, "خریدار: ${storeProfile.name} | تلفن: ${storeProfile.phone} | شناسه ملی: ${storeProfile.nationalCode}", (pageWidth - 30).toFloat(), y + 33f)
+                textPaint.isFakeBoldText = true
+                drawTextRtl(canvas, textPaint, "نشانی شرکت خریدار: ${storeProfile.address} | شیوه تسویه: $buyerPayDesc", (pageWidth - 30).toFloat(), y + 50f)
+            } else {
+                // For Sale / Return Sale: Seller is our Store, Buyer is the Customer
+                textPaint.isFakeBoldText = true
+                drawTextRtl(canvas, textPaint, "فروشنده: ${storeProfile.name} | تلفن: ${storeProfile.phone}", (pageWidth - 30).toFloat(), y + 18f)
+                textPaint.isFakeBoldText = false
+                drawTextRtl(canvas, textPaint, "آدرس: ${storeProfile.address} | شناسه ملی: ${storeProfile.nationalCode}", (pageWidth - 30).toFloat(), y + 33f)
+                textPaint.isFakeBoldText = true
+                drawTextRtl(canvas, textPaint, "خریدار / طرف‌حساب: ${invoice.partyName} | تماس: ${invoice.partyPhone.ifEmpty { "نقدی" }} | تسویه: $buyerPayDesc", (pageWidth - 30).toFloat(), y + 50f)
+            }
 
             y += 80f
 
@@ -268,8 +285,16 @@ object ExportHelper {
 
             // Signatures
             y += 125f
-            drawTextRtl(canvas, textPaint, "مهر و امضای فروشنده", 480f, y)
-            drawTextRtl(canvas, textPaint, "امضا و تایید خریدار", 150f, y)
+            val sig1 = when (invoice.invoiceType) {
+                "PURCHASE", "RETURN_PURCHASE" -> "مهر و امضای فروشنده (تأمین‌کننده)"
+                else -> "مهر و امضای فروشنده"
+            }
+            val sig2 = when (invoice.invoiceType) {
+                "PURCHASE", "RETURN_PURCHASE" -> "امضا و تایید تحویل خریدار (شرکت)"
+                else -> "امضا و تایید خریدار"
+            }
+            drawTextRtl(canvas, textPaint, sig1, 480f, y)
+            drawTextRtl(canvas, textPaint, sig2, 150f, y)
 
             pdfDocument.finishPage(page)
 
@@ -307,10 +332,20 @@ object ExportHelper {
             val sb = StringBuilder()
             // UTF-8 BOM
             sb.append('\uFEFF')
-            sb.append("عنوان,صورتحساب فروش کالا و خدمات ${storeProfile.name}\n")
+            val csvDocTitle = when (invoice.invoiceType) {
+                "PURCHASE" -> "صورتحساب خرید کالا و خدمات"
+                "RETURN_SALE" -> "صورتحساب برگشت از فروش کالا و خدمات"
+                "RETURN_PURCHASE" -> "صورتحساب برگشت از خرید کالا و خدمات"
+                else -> "صورتحساب فروش کالا و خدمات"
+            }
+            val partyLabel = when (invoice.invoiceType) {
+                "PURCHASE", "RETURN_PURCHASE" -> "نام فروشنده (تأمین‌کننده)"
+                else -> "نام خریدار"
+            }
+            sb.append("عنوان,$csvDocTitle ${storeProfile.name}\n")
             sb.append("شماره فاکتور,${invoice.invoiceNumber}\n")
             sb.append("تاریخ صدور,${invoice.jalaliDate}\n")
-            sb.append("نام خریدار,${invoice.partyName}\n")
+            sb.append("$partyLabel,${invoice.partyName}\n")
             sb.append("شماره تماس خریدار,${invoice.partyPhone}\n")
             sb.append("نوع تسویه,${NumberFormatUtils.formatPaymentType(invoice.paymentType)}\n")
             sb.append("\n")

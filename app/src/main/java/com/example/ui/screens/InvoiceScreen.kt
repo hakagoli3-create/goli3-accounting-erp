@@ -51,6 +51,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -235,6 +236,23 @@ fun InvoiceScreen(
                     }
                 }
             }
+        },
+        floatingActionButton = {
+            if (selectedTab == 0) {
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        viewModel.cancelEditingInvoice()
+                        selectedTab = 1
+                    },
+                    containerColor = NavyPrimary,
+                    contentColor = Color.White,
+                    modifier = Modifier.testTag("fab_create_invoice")
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("صدور سند جدید", fontWeight = FontWeight.Bold)
+                }
+            }
         }
     ) { innerPadding ->
         Box(
@@ -298,6 +316,8 @@ fun InvoiceScreen(
                     directExpenseType = directExpenseType,
                     editingInvoiceNumber = editingInvoiceNumber,
                     grandTotal = grandTotal,
+                    subtotal = subtotal,
+                    tax = tax,
                     selectedCurrencyCode = selectedCurrencyCode,
                     invoiceCurrencyRate = invoiceCurrencyRate,
                     availableCurrencies = currencies,
@@ -308,6 +328,7 @@ fun InvoiceScreen(
                     onAddToCart = { p, isPrimary -> viewModel.addToCart(p, isPrimary = isPrimary) },
                     onToggleUnit = { idx -> viewModel.toggleCartItemUnit(idx) },
                     onUpdateQuantity = { idx, q -> viewModel.updateCartItemQuantity(idx, q) },
+                    onUpdateUnitPrice = { idx, p -> viewModel.updateCartItemUnitPrice(idx, p) },
                     onDiscountChange = { viewModel.setDiscount(it) },
                     onToggleTax = { viewModel.toggleTax(it) },
                     onDirectExpenseChange = { amt, type -> viewModel.setDirectExpense(amt, type) },
@@ -1465,6 +1486,8 @@ private fun InvoiceEditorContent(
     directExpenseType: String,
     editingInvoiceNumber: String?,
     grandTotal: Long,
+    subtotal: Long = 0L,
+    tax: Long = 0L,
     selectedCurrencyCode: String,
     invoiceCurrencyRate: Double,
     availableCurrencies: List<CurrencyItem>,
@@ -1475,6 +1498,7 @@ private fun InvoiceEditorContent(
     onAddToCart: (ProductEntity, Boolean) -> Unit,
     onToggleUnit: (Int) -> Unit,
     onUpdateQuantity: (Int, Double) -> Unit,
+    onUpdateUnitPrice: (Int, Long) -> Unit = { _, _ -> },
     onDiscountChange: (Long) -> Unit,
     onToggleTax: (Boolean) -> Unit,
     onDirectExpenseChange: (Long, String) -> Unit,
@@ -1495,7 +1519,18 @@ private fun InvoiceEditorContent(
 
     val isPurchase = currentInvoiceType in listOf("PURCHASE", "RETURN_PURCHASE")
     val partyList = if (isPurchase) suppliers else customers
-    val partyLabel = if (isPurchase) "تأمین‌کننده / فروشنده" else "مشتری / خریدار"
+    val partyLabel = when (currentInvoiceType) {
+        "PURCHASE" -> "تأمین‌کننده / فروشنده"
+        "RETURN_PURCHASE" -> "تأمین‌کننده"
+        "RETURN_SALE" -> "خریدار / مرجوع‌کننده"
+        else -> "مشتری / خریدار"
+    }
+    val docTypeName = when (currentInvoiceType) {
+        "PURCHASE" -> "فاکتور خرید"
+        "RETURN_SALE" -> "مرجوعی فروش"
+        "RETURN_PURCHASE" -> "مرجوعی خرید"
+        else -> "فاکتور فروش"
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -1577,7 +1612,7 @@ private fun InvoiceEditorContent(
             }
         }
 
-        // نظام قیمت‌گذاری (عمده vs تکی)
+        // نظام قیمت‌گذاری (عمده vs تکی برای فروش / نرخ خرید برای فاکتور خرید)
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1592,31 +1627,46 @@ private fun InvoiceEditorContent(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "نظام قیمت‌گذاری فاکتور:",
+                            text = if (isPurchase) "مبنای قیمت‌گذاری اقلام خرید:" else "نظام قیمت‌گذاری فاکتور:",
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                         )
                         Text(
-                            text = if (isPurchase) "نرخ خرید پایه کالا از تأمین‌کننده" else if (pricingMode == "WHOLESALE") "نرخ همکار و عمده‌فروشی" else "نرخ تکی و مصرف‌کننده",
+                            text = if (isPurchase) "نرخ خرید پایه از تأمین‌کننده (امکان تغییر قیمت در ردیف)" else if (pricingMode == "WHOLESALE") "نرخ همکار و عمده‌فروشی" else "نرخ تکی و مصرف‌کننده",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        FilterChip(
-                            selected = pricingMode == "RETAIL",
-                            onClick = { onPricingModeChange("RETAIL") },
-                            label = { Text("فروش تکی") },
-                            modifier = Modifier.testTag("pricing_mode_retail")
-                        )
-                        FilterChip(
-                            selected = pricingMode == "WHOLESALE",
-                            onClick = { onPricingModeChange("WHOLESALE") },
-                            label = { Text("فروش عمده", fontWeight = FontWeight.Bold) },
-                            modifier = Modifier.testTag("pricing_mode_wholesale")
-                        )
+                    if (!isPurchase) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            FilterChip(
+                                selected = pricingMode == "RETAIL",
+                                onClick = { onPricingModeChange("RETAIL") },
+                                label = { Text("فروش تکی") },
+                                modifier = Modifier.testTag("pricing_mode_retail")
+                            )
+                            FilterChip(
+                                selected = pricingMode == "WHOLESALE",
+                                onClick = { onPricingModeChange("WHOLESALE") },
+                                label = { Text("فروش عمده", fontWeight = FontWeight.Bold) },
+                                modifier = Modifier.testTag("pricing_mode_wholesale")
+                            )
+                        }
+                    } else {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                        ) {
+                            Text(
+                                text = "بهای خرید",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -1954,9 +2004,10 @@ private fun InvoiceEditorContent(
                             onDismissRequest = { productMenuExpanded = false }
                         ) {
                             products.forEach { prod ->
-                                val priceToShow = if (pricingMode == "WHOLESALE") prod.wholesalePrice else prod.retailPrice
+                                val priceToShow = if (isPurchase) prod.buyPrice else if (pricingMode == "WHOLESALE") prod.wholesalePrice else prod.retailPrice
+                                val priceLabel = if (isPurchase) "فی خرید" else "فی"
                                 DropdownMenuItem(
-                                    text = { Text("${prod.name} | موجودی: ${prod.formatStockDisplay()} | فی: ${NumberFormatUtils.formatPrice(priceToShow)}") },
+                                    text = { Text("${prod.name} | موجودی: ${prod.formatStockDisplay()} | $priceLabel: ${NumberFormatUtils.formatPrice(priceToShow)}") },
                                     onClick = {
                                         selectedProductToAdd = prod
                                         productMenuExpanded = false
@@ -1988,7 +2039,9 @@ private fun InvoiceEditorContent(
                             }
                         }
 
-                        val unitPrice = if (pricingMode == "WHOLESALE") {
+                        val unitPrice = if (isPurchase) {
+                            if (usePrimaryUnit) (prod.buyPrice * prod.conversionRate).toLong() else prod.buyPrice
+                        } else if (pricingMode == "WHOLESALE") {
                             if (usePrimaryUnit) (prod.wholesalePrice * prod.conversionRate).toLong() else prod.wholesalePrice
                         } else {
                             if (usePrimaryUnit) (prod.retailPrice * prod.conversionRate).toLong() else prod.retailPrice
@@ -2010,7 +2063,7 @@ private fun InvoiceEditorContent(
                         ) {
                             Icon(imageVector = Icons.Default.Add, contentDescription = null)
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("افزودن این کالا به پیش‌فاکتور")
+                            Text("افزودن این کالا به $docTypeName")
                         }
                     }
                 }
@@ -2021,7 +2074,7 @@ private fun InvoiceEditorContent(
         if (cartItems.isNotEmpty()) {
             item {
                 Text(
-                    text = "اقلام پیش‌فاکتور (${cartItems.size} ردیف):",
+                    text = "اقلام $docTypeName (${cartItems.size} ردیف):",
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                 )
             }
@@ -2113,16 +2166,48 @@ private fun InvoiceEditorContent(
                             Switch(checked = applyTax, onCheckedChange = onToggleTax)
                         }
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
+
+                        // ریز محاسبات مالی شفاف
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("جمع اقلام:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(NumberFormatUtils.formatPrice(subtotal), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        if (discount > 0) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("تخفیف:", fontSize = 12.sp, color = AccountingCreditRed)
+                                Text("- " + NumberFormatUtils.formatPrice(discount), fontSize = 12.sp, color = AccountingCreditRed, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        if (applyTax) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("مالیات بر ارزش افزوده (۱۰٪):", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("+ " + NumberFormatUtils.formatPrice(tax), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        if (directExpenseAmount > 0) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("هزینه مستقیم ($directExpenseType):", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("+ " + NumberFormatUtils.formatPrice(directExpenseAmount), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        HorizontalDivider()
+                        Spacer(modifier = Modifier.height(8.dp))
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("مبلغ کل قابل پرداخت:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text("مبلغ کل قابل پرداخت ($docTypeName):", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             Text(
                                 text = NumberFormatUtils.formatPrice(grandTotal),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 17.sp,
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
@@ -2136,7 +2221,7 @@ private fun InvoiceEditorContent(
                         ) {
                             Icon(imageVector = Icons.Default.Payments, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("انتخاب نوع تسویه و ثبت نهایی فاکتور")
+                            Text("انتخاب نوع تسویه و ثبت نهایی $docTypeName")
                         }
                     }
                 }

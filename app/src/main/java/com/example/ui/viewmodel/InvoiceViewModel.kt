@@ -159,14 +159,27 @@ class InvoiceViewModel(
     fun setCurrentInvoiceType(type: String) {
         _currentInvoiceType.value = type
         if (_editingInvoiceId.value == null) {
-            if (type == "PURCHASE" || type == "RETURN_PURCHASE") {
-                if (_selectedParty.value != null && _selectedParty.value?.partyType != "SUPPLIER") {
+            val isPurchase = type in listOf("PURCHASE", "RETURN_PURCHASE")
+            if (isPurchase) {
+                if (_selectedParty.value != null && _selectedParty.value?.partyType != "SUPPLIER" && _selectedParty.value?.partyType != "BOTH") {
                     _selectedParty.value = allSuppliers.value.firstOrNull()
                 }
             } else {
-                if (_selectedParty.value != null && _selectedParty.value?.partyType == "SUPPLIER") {
+                if (_selectedParty.value != null && _selectedParty.value?.partyType != "CUSTOMER" && _selectedParty.value?.partyType != "BOTH") {
                     _selectedParty.value = allCustomers.value.firstOrNull()
                 }
+            }
+            val isWholesale = _pricingMode.value == "WHOLESALE"
+            _cartItems.value = _cartItems.value.map { item ->
+                val p = item.product
+                val newPrice = if (isPurchase) {
+                    if (item.isPrimaryUnit) (p.buyPrice * p.conversionRate).toLong() else p.buyPrice
+                } else if (isWholesale) {
+                    if (item.isPrimaryUnit) (p.wholesalePrice * p.conversionRate).toLong() else p.wholesalePrice
+                } else {
+                    if (item.isPrimaryUnit) (p.retailPrice * p.conversionRate).toLong() else p.retailPrice
+                }
+                item.copy(unitPrice = newPrice)
             }
         }
     }
@@ -368,6 +381,14 @@ class InvoiceViewModel(
         }
     }
 
+    fun updateCartItemUnitPrice(index: Int, newUnitPrice: Long) {
+        val current = _cartItems.value.toMutableList()
+        if (index in current.indices && newUnitPrice >= 0) {
+            current[index] = current[index].copy(unitPrice = newUnitPrice)
+            _cartItems.value = current
+        }
+    }
+
     fun setDirectExpense(amount: Long, type: String = "کرایه حمل و باربری") {
         _directExpenseAmount.value = amount
         _directExpenseType.value = type
@@ -526,7 +547,10 @@ class InvoiceViewModel(
                 taxAmount = inv.taxAmount,
                 totalAmount = inv.totalAmount,
                 paymentMethod = inv.paymentType,
-                note = inv.notes
+                directExpenseAmount = inv.directExpenseAmount,
+                directExpenseType = inv.directExpenseType,
+                note = inv.notes,
+                invoiceType = inv.invoiceType
             )
             val bytes = EscPosPrinterHelper.buildEscPosBytes(printable)
             val result = BluetoothThermalPrinter.printBytes(device, bytes)
@@ -582,10 +606,13 @@ class InvoiceViewModel(
             // بررسی سقف اعتبار در صورت وجود بخش نسیه
             if (effectiveCredit > 0 && !_issueAsProforma.value) {
                 if (party == null) {
-                    _alertMessage.value = "برای خرید نسیه، مشخص کردن طرف حساب (مشتری) الزامی است."
+                    val role = if (_currentInvoiceType.value in listOf("PURCHASE", "RETURN_PURCHASE")) "تأمین‌کننده" else "طرف حساب"
+                    _alertMessage.value = "برای خرید یا فروش نسیه، مشخص کردن $role الزامی است."
                     return@launch
                 }
-                if (!party.canAcceptCredit(effectiveCredit)) {
+                val isPurchaseDoc = _currentInvoiceType.value in listOf("PURCHASE", "RETURN_PURCHASE")
+                val isCustomer = party.partyType == "CUSTOMER" || party.partyType == "BOTH"
+                if (!isPurchaseDoc && isCustomer && !party.canAcceptCredit(effectiveCredit)) {
                     val remaining = party.remainingCredit()
                     _alertMessage.value = "هشدار سقف اعتبار! مانده بدهی مشتری از سقف مجاز فراتر می‌رود. مانده اعتبار مجاز: $remaining تومان"
                     return@launch
@@ -620,10 +647,7 @@ class InvoiceViewModel(
             val effectivePartyPhone = party?.mobile?.ifBlank { party.phone } ?: _editingPartyPhone.value ?: ""
             val effectiveDate = if (isEditing) (_editingOriginalDate.value ?: today.toStandardString()) else today.toStandardString()
 
-            val effectiveInvoiceType = when (_currentInvoiceType.value) {
-                "PURCHASE", "RETURN_SALE", "RETURN_PURCHASE" -> _currentInvoiceType.value
-                else -> if (paymentType == "CREDIT" || party != null || _editingPartyId.value != null) "SALE" else "POS_SALE"
-            }
+            val effectiveInvoiceType = _currentInvoiceType.value
 
             val curCode = _selectedCurrencyCode.value
             val curRate = _invoiceCurrencyRate.value
@@ -706,21 +730,30 @@ class InvoiceViewModel(
                 } catch (e: Exception) {
                     today.addDays(30).toEpochMillis()
                 }
+                val isPurchaseOrReturnSale = effectiveInvoiceType in listOf("PURCHASE", "RETURN_SALE")
+                val chequeType = if (isPurchaseOrReturnSale) "PAYABLE" else "RECEIVABLE"
+                val chequeNotes = if (isPurchaseOrReturnSale) {
+                    "صدور چک صیادی بابت فاکتور $nextNumber ($effectiveInvoiceType)"
+                } else {
+                    "دریافت چک صیادی بابت فاکتور $nextNumber ($effectiveInvoiceType)"
+                }
+                val defaultBankName = if (isPurchaseOrReturnSale) "حساب شرکت" else "بانک مشتری"
+
                 treasuryRepo.insertCheque(
                     ChequeEntity(
                         chequeNumber = chequeNumber,
                         sayadNumber = sayadNumber,
-                        type = "RECEIVABLE",
+                        type = chequeType,
                         partyId = party?.id,
-                        partyName = party?.name ?: "مشتری فاکتور $nextNumber",
-                        bankName = chequeBankName.ifBlank { "بانک مشتری" },
+                        partyName = party?.name ?: if (isPurchaseOrReturnSale) "تأمین‌کننده فاکتور $nextNumber" else "مشتری فاکتور $nextNumber",
+                        bankName = chequeBankName.ifBlank { defaultBankName },
                         branch = "مرکزی",
                         amount = effectiveCheque,
                         issueDateJalali = today.toStandardString(),
                         dueDateJalali = chequeDueDate.ifBlank { today.addDays(30).toStandardString() },
                         dueDateEpochMillis = dueEpoch,
                         status = "NORMAL",
-                        notes = "دریافت چک صیادی بابت فاکتور $nextNumber"
+                        notes = chequeNotes
                     )
                 )
             }
@@ -748,7 +781,8 @@ class InvoiceViewModel(
                 paymentMethod = invoice.paymentType,
                 directExpenseAmount = invoice.directExpenseAmount,
                 directExpenseType = invoice.directExpenseType,
-                note = notes
+                note = notes,
+                invoiceType = invoice.invoiceType
             )
 
             _previewReceiptText.value = EscPosPrinterHelper.buildPlainTextReceipt(printable)
@@ -781,7 +815,8 @@ class InvoiceViewModel(
             paymentMethod = invoice.paymentType,
             directExpenseAmount = invoice.directExpenseAmount,
             directExpenseType = invoice.directExpenseType,
-            note = invoice.notes
+            note = invoice.notes,
+            invoiceType = invoice.invoiceType
         )
         _previewReceiptText.value = EscPosPrinterHelper.buildPlainTextReceipt(printable)
     }

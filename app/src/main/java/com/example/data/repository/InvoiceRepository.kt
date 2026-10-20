@@ -66,6 +66,21 @@ class InvoiceRepository(
      * اعمال اثرات انبارداری، حسابداری، و خزانه‌داری یک فاکتور قطعی
      */
     private suspend fun applyInvoiceEffects(invoice: InvoiceEntity, items: List<InvoiceItemEntity>) {
+        // اطمینان از وجود انبار معتبر جهت رعایت کامل قیود کلید خارجی
+        val validWarehouseId = try {
+            val wh = inventoryDao.getWarehouseById(invoice.warehouseId)
+                ?: inventoryDao.getDefaultWarehouse()
+            wh?.id ?: inventoryDao.insertWarehouse(
+                com.example.data.model.WarehouseEntity(
+                    code = "WH-01",
+                    name = "انبار مرکزی",
+                    isDefault = true
+                )
+            )
+        } catch (e: Exception) {
+            1L
+        }
+
         // 1. به روزرسانی کاردکس و موجودی انبار برای هر قلم
         for (item in items) {
             val stockDelta = when (invoice.invoiceType) {
@@ -79,7 +94,7 @@ class InvoiceRepository(
             inventoryDao.insertMovement(
                 InventoryMovementEntity(
                     productId = item.productId,
-                    warehouseId = invoice.warehouseId,
+                    warehouseId = validWarehouseId,
                     jalaliDate = invoice.jalaliDate,
                     documentType = invoice.invoiceType,
                     referenceNumber = invoice.invoiceNumber,
@@ -476,26 +491,156 @@ class InvoiceRepository(
 
         // 4. ثبت سند معکوس در حسابداری
         try {
-            val nextVoucher = accountingDao.getMaxVoucherNumber() + 1
-            accountingDao.createVoucherWithItems(
-                JournalEntryEntity(
-                    voucherNumber = nextVoucher,
-                    jalaliDate = JalaliDate.now().toStandardString(),
-                    description = "سند ابطال/برگشت فاکتور شماره ${invoice.invoiceNumber}",
-                    isBalanced = true,
-                    status = "FINAL"
-                ),
-                listOf(
-                    JournalItemEntity(
-                        voucherId = 0L, generalCode = 601, subsidiaryCode = 60101, partyId = invoice.partyId,
-                        description = "ابطال اثر مالی فاکتور ${invoice.invoiceNumber}", debit = invoice.totalAmount, credit = 0L
-                    ),
-                    JournalItemEntity(
-                        voucherId = 0L, generalCode = 101, subsidiaryCode = if (invoice.posAmount > 0) 10102 else 10101, partyId = null,
-                        description = "برگشت تسویه فاکتور باطل شده ${invoice.invoiceNumber}", debit = 0L, credit = invoice.totalAmount
+            val totalInBase = if (invoice.totalAmountInBase > 0) invoice.totalAmountInBase else toBase(invoice.totalAmount)
+            val chequeInBase = if (invoice.chequeAmountInBase > 0) invoice.chequeAmountInBase else toBase(invoice.chequeAmount)
+            val rollbackItems = mutableListOf<JournalItemEntity>()
+
+            when (invoice.invoiceType) {
+                "SALE", "POS_SALE" -> {
+                    rollbackItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 601, subsidiaryCode = 60101, partyId = invoice.partyId,
+                            description = "ابطال درآمد فروش - فاکتور ${invoice.invoiceNumber}", debit = totalInBase, credit = 0L
+                        )
                     )
+                    if (cashInBase > 0) rollbackItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 101, subsidiaryCode = 10101, partyId = null,
+                            description = "برگشت نقد فاکتور باطل شده ${invoice.invoiceNumber}", debit = 0L, credit = cashInBase
+                        )
+                    )
+                    if (posInBase > 0) rollbackItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 101, subsidiaryCode = 10102, partyId = null,
+                            description = "برگشت واریز پوز فاکتور باطل شده ${invoice.invoiceNumber}", debit = 0L, credit = posInBase
+                        )
+                    )
+                    if (creditInBase > 0) rollbackItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 102, subsidiaryCode = 10201, partyId = invoice.partyId,
+                            description = "ابطال بدهکاری مشتری - فاکتور باطل شده ${invoice.invoiceNumber}", debit = 0L, credit = creditInBase
+                        )
+                    )
+                    if (chequeInBase > 0) rollbackItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 102, subsidiaryCode = 10202, partyId = invoice.partyId,
+                            description = "برگشت چک دریافتی فاکتور باطل شده ${invoice.invoiceNumber}", debit = 0L, credit = chequeInBase
+                        )
+                    )
+                }
+                "PURCHASE" -> {
+                    if (cashInBase > 0) rollbackItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 101, subsidiaryCode = 10101, partyId = null,
+                            description = "برگشت وجه نقد پرداختی خرید باطل شده ${invoice.invoiceNumber}", debit = cashInBase, credit = 0L
+                        )
+                    )
+                    if (posInBase > 0) rollbackItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 101, subsidiaryCode = 10102, partyId = null,
+                            description = "برگشت پرداخت بانکی خرید باطل شده ${invoice.invoiceNumber}", debit = posInBase, credit = 0L
+                        )
+                    )
+                    if (creditInBase > 0) rollbackItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 301, subsidiaryCode = 30101, partyId = invoice.partyId,
+                            description = "ابطال بدهی به تأمین‌کننده بابت خرید باطل شده ${invoice.invoiceNumber}", debit = creditInBase, credit = 0L
+                        )
+                    )
+                    if (chequeInBase > 0) rollbackItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 301, subsidiaryCode = 30102, partyId = invoice.partyId,
+                            description = "ابطال چک صادره خرید باطل شده ${invoice.invoiceNumber}", debit = chequeInBase, credit = 0L
+                        )
+                    )
+                    rollbackItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 103, subsidiaryCode = 10301, partyId = invoice.partyId,
+                            description = "ابطال ورود کالا/خرید - فاکتور ${invoice.invoiceNumber}", debit = 0L, credit = totalInBase
+                        )
+                    )
+                }
+                "RETURN_SALE" -> {
+                    if (cashInBase > 0) rollbackItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 101, subsidiaryCode = 10101, partyId = null,
+                            description = "برگشت استرداد نقد مرجوعی فروش ${invoice.invoiceNumber}", debit = cashInBase, credit = 0L
+                        )
+                    )
+                    if (posInBase > 0) rollbackItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 101, subsidiaryCode = 10102, partyId = null,
+                            description = "برگشت استرداد پوز مرجوعی فروش ${invoice.invoiceNumber}", debit = posInBase, credit = 0L
+                        )
+                    )
+                    if (creditInBase > 0) rollbackItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 102, subsidiaryCode = 10201, partyId = invoice.partyId,
+                            description = "برگشت کاهش حساب مرجوعی فروش ${invoice.invoiceNumber}", debit = creditInBase, credit = 0L
+                        )
+                    )
+                    if (chequeInBase > 0) rollbackItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 102, subsidiaryCode = 10202, partyId = invoice.partyId,
+                            description = "برگشت چک استردادی مرجوعی فروش ${invoice.invoiceNumber}", debit = chequeInBase, credit = 0L
+                        )
+                    )
+                    rollbackItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 601, subsidiaryCode = 60102, partyId = invoice.partyId,
+                            description = "ابطال مرجوعی فروش ${invoice.invoiceNumber}", debit = 0L, credit = totalInBase
+                        )
+                    )
+                }
+                "RETURN_PURCHASE" -> {
+                    rollbackItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 103, subsidiaryCode = 10302, partyId = invoice.partyId,
+                            description = "ابطال مرجوعی خرید ${invoice.invoiceNumber}", debit = totalInBase, credit = 0L
+                        )
+                    )
+                    if (cashInBase > 0) rollbackItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 101, subsidiaryCode = 10101, partyId = null,
+                            description = "برگشت دریافت نقدی مرجوعی خرید ${invoice.invoiceNumber}", debit = 0L, credit = cashInBase
+                        )
+                    )
+                    if (posInBase > 0) rollbackItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 101, subsidiaryCode = 10102, partyId = null,
+                            description = "برگشت دریافت بانکی مرجوعی خرید ${invoice.invoiceNumber}", debit = 0L, credit = posInBase
+                        )
+                    )
+                    if (creditInBase > 0) rollbackItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 301, subsidiaryCode = 30101, partyId = invoice.partyId,
+                            description = "برگشت کاهش بدهی مرجوعی خرید ${invoice.invoiceNumber}", debit = 0L, credit = creditInBase
+                        )
+                    )
+                    if (chequeInBase > 0) rollbackItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 301, subsidiaryCode = 30102, partyId = invoice.partyId,
+                            description = "برگشت چک مرجوعی خرید ${invoice.invoiceNumber}", debit = 0L, credit = chequeInBase
+                        )
+                    )
+                }
+            }
+
+            val totalDebit = rollbackItems.sumOf { it.debit }
+            val totalCredit = rollbackItems.sumOf { it.credit }
+            if (totalDebit == totalCredit && rollbackItems.isNotEmpty()) {
+                val nextVoucher = accountingDao.getMaxVoucherNumber() + 1
+                accountingDao.createVoucherWithItems(
+                    JournalEntryEntity(
+                        voucherNumber = nextVoucher,
+                        jalaliDate = JalaliDate.now().toStandardString(),
+                        description = "سند ابطال/برگشت فاکتور شماره ${invoice.invoiceNumber} (${invoice.invoiceType})",
+                        isBalanced = true,
+                        status = "FINAL"
+                    ),
+                    rollbackItems
                 )
-            )
+            }
         } catch (e: Exception) {
             android.util.Log.e("InvoiceRepository", "Error creating rollback accounting voucher", e)
         }

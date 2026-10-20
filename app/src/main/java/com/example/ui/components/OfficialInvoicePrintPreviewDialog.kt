@@ -116,9 +116,15 @@ fun OfficialInvoicePrintPreviewDialog(
                             )
                         }
                         Spacer(modifier = Modifier.width(8.dp))
+                        val officialDocTitle = when (inv.invoiceType) {
+                            "PURCHASE" -> "صورتحساب رسمی خرید کالا و خدمات"
+                            "RETURN_SALE" -> "صورتحساب رسمی برگشت از فروش کالا و خدمات"
+                            "RETURN_PURCHASE" -> "صورتحساب رسمی برگشت از خرید کالا و خدمات"
+                            else -> "صورتحساب رسمی فروش کالا و خدمات"
+                        }
                         Column {
                             Text(
-                                text = "صورتحساب رسمی فروش کالا و خدمات",
+                                text = officialDocTitle,
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                             )
                             Text(
@@ -250,7 +256,11 @@ fun OfficialInvoicePrintPreviewDialog(
                                 discountAmount = inv.discountAmount,
                                 taxAmount = inv.taxAmount,
                                 totalAmount = inv.totalAmount,
-                                paymentMethod = inv.paymentType
+                                paymentMethod = inv.paymentType,
+                                directExpenseAmount = inv.directExpenseAmount,
+                                directExpenseType = inv.directExpenseType,
+                                note = inv.notes,
+                                invoiceType = inv.invoiceType
                             )
                             val text = com.example.util.EscPosPrinterHelper.buildPlainTextReceipt(printable)
                             ExportHelper.shareText(context, text, "ارسال فاکتور متنی")
@@ -301,8 +311,14 @@ fun OfficialInvoicePrintPreviewDialog(
                                             fontSize = 15.sp,
                                             color = Color.White
                                         )
+                                        val paperHeaderTitle = when (inv.invoiceType) {
+                                            "PURCHASE" -> "صورتحساب رسمی خرید کالا و خدمات"
+                                            "RETURN_SALE" -> "صورتحساب رسمی برگشت از فروش کالا و خدمات"
+                                            "RETURN_PURCHASE" -> "صورتحساب رسمی برگشت از خرید کالا و خدمات"
+                                            else -> "صورتحساب رسمی فروش کالا و خدمات"
+                                        }
                                         Text(
-                                            text = "صورتحساب رسمی فروش کالا و خدمات",
+                                            text = paperHeaderTitle,
                                             fontSize = 11.sp,
                                             color = PersianGold
                                         )
@@ -334,39 +350,73 @@ fun OfficialInvoicePrintPreviewDialog(
                         Spacer(modifier = Modifier.height(10.dp))
 
                         // Seller & Buyer Specification Cards
+                        val isPurchaseOrReturnPurchase = inv.invoiceType in listOf("PURCHASE", "RETURN_PURCHASE")
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            // Seller Box
-                            Card(
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(8.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                            ) {
-                                Column(modifier = Modifier.padding(8.dp)) {
-                                    Text("مشخصات فروشنده", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
-                                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                                    Text("نام: ${storeProfile.name}", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                                    Text("شناسه ملی: ${NumberFormatUtils.toPersianDigits(storeProfile.nationalCode.ifBlank { "---" })}", fontSize = 10.sp)
-                                    Text("تلفن: ${NumberFormatUtils.toPersianDigits(storeProfile.phone)}", fontSize = 10.sp)
-                                    Text("نشانی: ${storeProfile.address}", fontSize = 9.sp, maxLines = 2, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (isPurchaseOrReturnPurchase) {
+                                // For Purchase: Seller is Supplier (party), Buyer is our Store
+                                Card(
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                                ) {
+                                    Column(modifier = Modifier.padding(8.dp)) {
+                                        Text("مشخصات فروشنده / تأمین‌کننده", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                                        Text("نام: ${inv.partyName}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        Text("کد طرف‌حساب: ${if ((inv.partyId ?: 0L) > 0) NumberFormatUtils.toPersianDigits(inv.partyId.toString()) else "تأمین‌کننده نقدی"}", fontSize = 10.sp)
+                                        Text("شماره تماس: ${NumberFormatUtils.toPersianDigits(inv.partyPhone.ifEmpty { "---" })}", fontSize = 10.sp)
+                                        Text("نوع تسویه: ${NumberFormatUtils.formatPaymentType(inv.paymentType)}", fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                                    }
                                 }
-                            }
 
-                            // Buyer Box
-                            Card(
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(8.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                            ) {
-                                Column(modifier = Modifier.padding(8.dp)) {
-                                    Text("مشخصات خریدار / طرف‌حساب", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
-                                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                                    Text("نام: ${inv.partyName}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                    Text("کد طرف‌حساب: ${if ((inv.partyId ?: 0L) > 0) NumberFormatUtils.toPersianDigits(inv.partyId.toString()) else "مشتری نقدی"}", fontSize = 10.sp)
-                                    Text("شماره تماس: ${NumberFormatUtils.toPersianDigits(inv.partyPhone.ifEmpty { "نقدی" })}", fontSize = 10.sp)
-                                    Text("نوع تسویه: ${NumberFormatUtils.formatPaymentType(inv.paymentType)}", fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                                Card(
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                                ) {
+                                    Column(modifier = Modifier.padding(8.dp)) {
+                                        Text("مشخصات خریدار (شرکت)", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                                        Text("نام: ${storeProfile.name}", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                        Text("شناسه ملی: ${NumberFormatUtils.toPersianDigits(storeProfile.nationalCode.ifBlank { "---" })}", fontSize = 10.sp)
+                                        Text("تلفن: ${NumberFormatUtils.toPersianDigits(storeProfile.phone)}", fontSize = 10.sp)
+                                        Text("نشانی: ${storeProfile.address}", fontSize = 9.sp, maxLines = 2, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            } else {
+                                // For Sale / Return Sale: Seller is our Store, Buyer is the Customer
+                                val partyTitle = if (inv.invoiceType == "RETURN_SALE") "مشخصات مرجوع‌کننده / خریدار" else "مشخصات خریدار / طرف‌حساب"
+                                Card(
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                                ) {
+                                    Column(modifier = Modifier.padding(8.dp)) {
+                                        Text("مشخصات فروشنده", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                                        Text("نام: ${storeProfile.name}", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                        Text("شناسه ملی: ${NumberFormatUtils.toPersianDigits(storeProfile.nationalCode.ifBlank { "---" })}", fontSize = 10.sp)
+                                        Text("تلفن: ${NumberFormatUtils.toPersianDigits(storeProfile.phone)}", fontSize = 10.sp)
+                                        Text("نشانی: ${storeProfile.address}", fontSize = 9.sp, maxLines = 2, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+
+                                Card(
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                                ) {
+                                    Column(modifier = Modifier.padding(8.dp)) {
+                                        Text(partyTitle, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                                        Text("نام: ${inv.partyName}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        Text("کد طرف‌حساب: ${if ((inv.partyId ?: 0L) > 0) NumberFormatUtils.toPersianDigits(inv.partyId.toString()) else "مشتری نقدی"}", fontSize = 10.sp)
+                                        Text("شماره تماس: ${NumberFormatUtils.toPersianDigits(inv.partyPhone.ifEmpty { "نقدی" })}", fontSize = 10.sp)
+                                        Text("نوع تسویه: ${NumberFormatUtils.formatPaymentType(inv.paymentType)}", fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                                    }
                                 }
                             }
                         }
@@ -535,6 +585,25 @@ fun OfficialInvoicePrintPreviewDialog(
                         Spacer(modifier = Modifier.height(16.dp))
 
                         // Seal and Signature Boxes
+                        val sigTitle1 = when (inv.invoiceType) {
+                            "PURCHASE", "RETURN_PURCHASE" -> "مهر و امضای فروشنده (تأمین‌کننده)"
+                            "RETURN_SALE" -> "امضا و تایید تحویل فروشنده (شرکت)"
+                            else -> "مهر و امضای فروشنده"
+                        }
+                        val sigName1 = when (inv.invoiceType) {
+                            "PURCHASE", "RETURN_PURCHASE" -> inv.partyName
+                            else -> storeProfile.name
+                        }
+                        val sigTitle2 = when (inv.invoiceType) {
+                            "PURCHASE", "RETURN_PURCHASE" -> "امضا و تایید تحویل خریدار (شرکت)"
+                            "RETURN_SALE" -> "امضای خریدار / مرجوع‌کننده"
+                            else -> "امضا و تایید تحویل خریدار"
+                        }
+                        val sigName2 = when (inv.invoiceType) {
+                            "PURCHASE", "RETURN_PURCHASE" -> storeProfile.name
+                            else -> inv.partyName
+                        }
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
@@ -553,9 +622,9 @@ fun OfficialInvoicePrintPreviewDialog(
                                         .fillMaxWidth(),
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
-                                    Text("مهر و امضای فروشنده", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                                    Text(sigTitle1, fontWeight = FontWeight.Bold, fontSize = 10.sp)
                                     Spacer(modifier = Modifier.weight(1f))
-                                    Text(storeProfile.name, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(sigName1, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
 
@@ -575,9 +644,9 @@ fun OfficialInvoicePrintPreviewDialog(
                                         .fillMaxWidth(),
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
-                                    Text("امضا و تایید تحویل خریدار", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                                    Text(sigTitle2, fontWeight = FontWeight.Bold, fontSize = 10.sp)
                                     Spacer(modifier = Modifier.weight(1f))
-                                    Text(inv.partyName, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(sigName2, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
