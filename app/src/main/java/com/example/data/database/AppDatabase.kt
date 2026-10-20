@@ -11,6 +11,7 @@ import com.example.data.dao.ExpenseAndIncomeDao
 import com.example.data.dao.InventoryDao
 import com.example.data.dao.InvoiceDao
 import com.example.data.dao.PartyDao
+import com.example.data.dao.StoreSettingsDao
 import com.example.data.dao.TreasuryDao
 import com.example.data.dao.UserDao
 import com.example.data.model.AccountGroupEntity
@@ -30,6 +31,7 @@ import com.example.data.model.JournalEntryEntity
 import com.example.data.model.JournalItemEntity
 import com.example.data.model.PartyEntity
 import com.example.data.model.ProductEntity
+import com.example.data.model.StoreSettingsEntity
 import com.example.data.model.SubsidiaryAccountEntity
 import com.example.data.model.TreasuryCurrencyBalanceEntity
 import com.example.data.model.UserEntity
@@ -60,9 +62,10 @@ import kotlinx.coroutines.launch
         IncomeEntity::class,
         UserEntity::class,
         ExchangeRateEntity::class,
-        TreasuryCurrencyBalanceEntity::class
+        TreasuryCurrencyBalanceEntity::class,
+        StoreSettingsEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -75,6 +78,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun expenseAndIncomeDao(): ExpenseAndIncomeDao
     abstract fun userDao(): UserDao
     abstract fun exchangeRateDao(): ExchangeRateDao
+    abstract fun storeSettingsDao(): StoreSettingsDao
 
     companion object {
         @Volatile
@@ -286,6 +290,29 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS store_settings (
+                        id INTEGER PRIMARY KEY NOT NULL,
+                        name TEXT NOT NULL,
+                        managerName TEXT NOT NULL,
+                        phone TEXT NOT NULL,
+                        mobile TEXT NOT NULL,
+                        address TEXT NOT NULL,
+                        nationalCode TEXT NOT NULL,
+                        economicCode TEXT NOT NULL,
+                        defaultBankCard TEXT NOT NULL,
+                        defaultSheba TEXT NOT NULL,
+                        taxRatePercent INTEGER NOT NULL,
+                        wholesaleDiscountLimitPercent INTEGER NOT NULL,
+                        currenciesJson TEXT NOT NULL,
+                        updatedAt INTEGER NOT NULL
+                    )
+                """.trimIndent())
+            }
+        }
+
         /**
          * بستن قطعی نمونه جاری Room جهت آماده‌سازی برای عملیات بازیابی (Restore) یا اعمال تنظیمات رمزنگاری
          */
@@ -337,6 +364,7 @@ abstract class AppDatabase : RoomDatabase() {
                             CoroutineScope(Dispatchers.IO).launch {
                                 getInstance(context).let { appDb ->
                                     DatabaseSeeder.seedDefaultData(appDb)
+                                    DatabaseSeeder.ensureStoreSettings(appDb, context)
                                 }
                             }
                         }
@@ -346,11 +374,12 @@ abstract class AppDatabase : RoomDatabase() {
                             CoroutineScope(Dispatchers.IO).launch {
                                 getInstance(context).let { appDb ->
                                     DatabaseSeeder.ensureDefaultUsers(appDb)
+                                    DatabaseSeeder.ensureStoreSettings(appDb, context)
                                 }
                             }
                         }
                     })
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                     // Note: fallbackToDestructiveMigration() is strictly removed to guarantee
                     // that financial, user, stock, and accounting data will NEVER be dropped or wiped on app updates.
                     .build()

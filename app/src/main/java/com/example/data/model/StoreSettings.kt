@@ -3,9 +3,12 @@ package com.example.data.model
 import android.content.Context
 import android.content.SharedPreferences
 import com.example.data.database.AppDatabase
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -90,7 +93,7 @@ enum class CloudSyncStatus(val title: String) {
     FAILED("خطا در ارتباط با سرور ابری")
 }
 
-class AppSecurityAndSettingsManager(context: Context) {
+class AppSecurityAndSettingsManager(private val context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("goli_erp_settings", Context.MODE_PRIVATE)
 
     // Currencies State
@@ -265,6 +268,86 @@ class AppSecurityAndSettingsManager(context: Context) {
             .putInt("tax_rate", profile.taxRatePercent)
             .putInt("wholesale_discount_limit", profile.wholesaleDiscountLimitPercent)
             .commit()
+
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                val db = AppDatabase.getInstance(context)
+                syncProfileToDatabase(db, profile)
+            } catch (_: Exception) {}
+        }
+    }
+
+    suspend fun syncProfileToDatabase(db: AppDatabase, profile: StoreProfile = _storeProfile.value) {
+        try {
+            val entity = StoreSettingsEntity(
+                id = 1,
+                name = profile.name,
+                managerName = profile.managerName,
+                phone = profile.phone,
+                mobile = profile.mobile,
+                address = profile.address,
+                nationalCode = profile.nationalCode,
+                economicCode = profile.economicCode,
+                defaultBankCard = profile.defaultBankCard,
+                defaultSheba = profile.defaultSheba,
+                taxRatePercent = profile.taxRatePercent,
+                wholesaleDiscountLimitPercent = profile.wholesaleDiscountLimitPercent,
+                currenciesJson = getCurrenciesAsJson(),
+                updatedAt = System.currentTimeMillis()
+            )
+            db.storeSettingsDao().insertOrUpdate(entity)
+            android.util.Log.i("AppSecurityAndSettingsManager", "Store profile synced to database successfully: ${profile.name}")
+        } catch (e: Exception) {
+            System.err.println("CRITICAL_SYNC_ERROR: " + e::class.java.name + ": " + e.message)
+            e.printStackTrace()
+            android.util.Log.e("AppSecurityAndSettingsManager", "Failed to sync profile to database: ${e.message}", e)
+        }
+    }
+
+    suspend fun reloadFromDatabase(db: AppDatabase) {
+        try {
+            val settings = db.storeSettingsDao().getStoreSettings()
+            if (settings != null) {
+                val profile = StoreProfile(
+                    name = settings.name,
+                    managerName = settings.managerName,
+                    phone = settings.phone,
+                    mobile = settings.mobile,
+                    address = settings.address,
+                    nationalCode = settings.nationalCode,
+                    economicCode = settings.economicCode,
+                    defaultBankCard = settings.defaultBankCard,
+                    defaultSheba = settings.defaultSheba,
+                    taxRatePercent = settings.taxRatePercent,
+                    wholesaleDiscountLimitPercent = settings.wholesaleDiscountLimitPercent
+                )
+                _storeProfile.value = profile
+                prefs.edit()
+                    .putString("store_name", profile.name)
+                    .putString("manager_name", profile.managerName)
+                    .putString("store_phone", profile.phone)
+                    .putString("store_mobile", profile.mobile)
+                    .putString("store_address", profile.address)
+                    .putString("store_national", profile.nationalCode)
+                    .putString("store_economic", profile.economicCode)
+                    .putString("store_card", profile.defaultBankCard)
+                    .putString("store_sheba", profile.defaultSheba)
+                    .putInt("tax_rate", profile.taxRatePercent)
+                    .putInt("wholesale_discount_limit", profile.wholesaleDiscountLimitPercent)
+                    .commit()
+
+                if (settings.currenciesJson.isNotBlank()) {
+                    val currenciesList = parseCurrenciesFromJson(settings.currenciesJson)
+                    if (currenciesList.isNotEmpty()) {
+                        _currencies.value = currenciesList
+                        prefs.edit().putString("system_currencies", settings.currenciesJson).commit()
+                    }
+                }
+                android.util.Log.i("AppSecurityAndSettingsManager", "Store profile reloaded from database successfully: ${profile.name}")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("AppSecurityAndSettingsManager", "Error reloading store settings from database: ${e.message}", e)
+        }
     }
 
     fun setSyncStatus(status: CloudSyncStatus, time: String? = null) {
@@ -328,6 +411,53 @@ class AppSecurityAndSettingsManager(context: Context) {
         saveCurrencies(getDefaultCurrenciesList())
     }
 
+    fun getCurrenciesAsJson(): String {
+        return try {
+            val array = JSONArray()
+            for (item in _currencies.value) {
+                val obj = JSONObject()
+                obj.put("code", item.code)
+                obj.put("nameFa", item.nameFa)
+                obj.put("symbol", item.symbol)
+                obj.put("exchangeRateToBase", item.exchangeRateToBase)
+                obj.put("isActive", item.isActive)
+                obj.put("isBaseCurrency", item.isBaseCurrency)
+                obj.put("isDefaultInvoiceCurrency", item.isDefaultInvoiceCurrency)
+                obj.put("decimals", item.decimals)
+                array.put(obj)
+            }
+            array.toString()
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    fun parseCurrenciesFromJson(rawJson: String): List<CurrencyItem> {
+        if (rawJson.isBlank()) return emptyList()
+        return try {
+            val array = JSONArray(rawJson)
+            val list = mutableListOf<CurrencyItem>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                list.add(
+                    CurrencyItem(
+                        code = obj.optString("code", "TOMAN"),
+                        nameFa = obj.optString("nameFa", "تومان"),
+                        symbol = obj.optString("symbol", "تومان"),
+                        exchangeRateToBase = obj.optDouble("exchangeRateToBase", 1.0),
+                        isActive = obj.optBoolean("isActive", true),
+                        isBaseCurrency = obj.optBoolean("isBaseCurrency", false),
+                        isDefaultInvoiceCurrency = obj.optBoolean("isDefaultInvoiceCurrency", false),
+                        decimals = obj.optInt("decimals", 0)
+                    )
+                )
+            }
+            list
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     fun saveCurrencies(list: List<CurrencyItem>) {
         _currencies.value = list
         try {
@@ -345,6 +475,13 @@ class AppSecurityAndSettingsManager(context: Context) {
                 array.put(obj)
             }
             prefs.edit().putString("system_currencies", array.toString()).commit()
+
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                try {
+                    val db = AppDatabase.getInstance(context)
+                    syncProfileToDatabase(db)
+                } catch (_: Exception) {}
+            }
         } catch (_: Exception) {}
     }
 

@@ -175,4 +175,33 @@ object DatabaseSeeder {
             // Ignore if already existing
         }
     }
+
+    suspend fun ensureStoreSettings(db: AppDatabase, context: android.content.Context) {
+        try {
+            val existing = db.storeSettingsDao().getStoreSettings()
+            if (existing == null) {
+                val sec = com.example.data.model.AppSecurityAndSettingsManager.getInstance(context)
+                val profile = sec.storeProfile.value
+                val currenciesJson = sec.getCurrenciesAsJson()
+                db.storeSettingsDao().insertOrUpdate(
+                    com.example.data.model.StoreSettingsEntity(
+                        id = 1,
+                        name = profile.name,
+                        managerName = profile.managerName,
+                        phone = profile.phone,
+                        mobile = profile.mobile,
+                        address = profile.address,
+                        nationalCode = profile.nationalCode,
+                        economicCode = profile.economicCode,
+                        defaultBankCard = profile.defaultBankCard,
+                        defaultSheba = profile.defaultSheba,
+                        taxRatePercent = profile.taxRatePercent,
+                        wholesaleDiscountLimitPercent = profile.wholesaleDiscountLimitPercent,
+                        currenciesJson = currenciesJson,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+            }
+        } catch (_: Exception) {}
+    }
 }

@@ -61,7 +61,16 @@ object DatabaseBackupHelper {
         try {
             Log.i(TAG, "Starting database backup creation...")
 
-            // ۱. فلاش کردن تمام صفحات معلق لاگ WAL به فایل اصلی با دستور PRAGMA wal_checkpoint(TRUNCATE)
+            // ۱. اطمینان از ذخیره قطعی و بلادرنگ مشخصات فروشگاه و ارزها در جدول اختصاصی دیتابیس
+            try {
+                val secManager = com.example.data.model.AppSecurityAndSettingsManager.getInstance(context)
+                val appDb = AppDatabase.getInstance(context)
+                secManager.syncProfileToDatabase(appDb)
+            } catch (e: Exception) {
+                Log.w(TAG, "Warning syncing profile to DB before backup: ${e.localizedMessage}")
+            }
+
+            // ۲. فلاش کردن تمام صفحات معلق لاگ WAL به فایل اصلی با دستور PRAGMA wal_checkpoint(TRUNCATE)
             try {
                 val appDb = AppDatabase.getInstance(context)
                 if (appDb.isOpen) {
@@ -75,7 +84,7 @@ object DatabaseBackupHelper {
                 Log.w(TAG, "Warning during WAL checkpoint: ${e.localizedMessage}")
             }
 
-            // ۲. بررسی وجود و اندازه فایل دیتابیس فعلی
+            // ۳. بررسی وجود و اندازه فایل دیتابیس فعلی
             val currentDbPath = context.getDatabasePath(DB_NAME)
             if (!currentDbPath.exists() || currentDbPath.length() == 0L) {
                 val errorMsg = "فایل پایگاه داده اصلی برنامه یافت نشد یا هنوز ایجاد نشده است: ${currentDbPath.absolutePath}"
@@ -83,13 +92,13 @@ object DatabaseBackupHelper {
                 return@withContext Result.failure(IOException(errorMsg))
             }
 
-            // ۳. ایجاد فایل مقصد در پوشه مجاز
+            // ۴. ایجاد فایل مقصد در پوشه مجاز
             val backupDir = getBackupDirectory(context)
             val timestamp = JalaliDate.now().toStandardString().replace("/", "-") +
                     "_" + (System.currentTimeMillis() % 100000)
             val backupFile = File(backupDir, "Goli_Accounting_Backup_$timestamp.db")
 
-            // ۴. کپی مستقیم باینری با بافر و سینک فیزیکی دیسک
+            // ۵. کپی مستقیم باینری با بافر و سینک فیزیکی دیسک
             var totalBytesCopied: Long = 0
             FileInputStream(currentDbPath).use { input ->
                 FileOutputStream(backupFile).use { output ->
@@ -106,10 +115,18 @@ object DatabaseBackupHelper {
                 return@withContext Result.failure(IOException(errorMsg))
             }
 
-            // ۵. اعتبارسنجی هدر باینری فایل پشتیبان تولید شده
+            // ۶. اعتبارسنجی هدر و ساختار باینری فایل پشتیبان تولید شده
             if (!verifySqliteHeader(backupFile)) {
                 backupFile.delete()
                 val errorMsg = "هدر فایل خروجی با ساختار استاندارد SQLite همخوانی ندارد."
+                Log.e(TAG, errorMsg)
+                return@withContext Result.failure(IllegalStateException(errorMsg))
+            }
+
+            val integrityCheck = DatabaseSecurityManager.verifyDatabaseIntegrity(backupFile)
+            if (!integrityCheck.first) {
+                backupFile.delete()
+                val errorMsg = "اعتبارسنجی ساختار دیتابیس پشتیبان ناموفق بود: ${integrityCheck.second}"
                 Log.e(TAG, errorMsg)
                 return@withContext Result.failure(IllegalStateException(errorMsg))
             }
@@ -123,15 +140,18 @@ object DatabaseBackupHelper {
     }
 
     /**
-     * بازیابی واقعی و بازنویسی باینری پایگاه داده از Uri انتخابی (تلگرام، فایل منیجر، دانلودها)
+     * بازیابی واقعی، اعتبارسنجی یکپارچگی عمیق و بازنویسی اتمیک پایگاه داده
      *
-     * گام‌های دقیق برای تضمین بازیابی واقعی:
-     * ۱. کپی فایل ورودی از طریق ContentResolver به فایل موقت (Temp) در پوشه دیتابیس
-     * ۲. اعتبارسنجی هدر باینری فایل جهت جلوگیری از جایگزینی فایلهای خراب یا غیردیتابیسی
-     * ۳. بستن قطعی تمام اتصالات فعال Room (Close Database Connections) جهت رهاسازی قفلها
-     * ۴. حذف فایلهای لاگ WAL و SHM قبلی برای جلوگیری از اجرای لاگهای قدیمی روی دیتابیس جدید
-     * ۵. بازنویسی باینری مستقیم (Direct Binary Overwrite) روی مسیر getDatabasePath
-     * ۶. بازگشایی مجدد نمونه Room و تست خواندن دادهها
+     * گام‌های دقیق برای تضمین بازیابی واقعی و اتمیک (بدون خطر از دست رفتن اطلاعات):
+     * ۱. کپی جریان باینری از طریق ContentResolver به فایل موقت (Temp)
+     * ۲. اعتبارسنجی هدر باینری SQLite و بررسی یکپارچگی عمیق جداول (PRAGMA integrity_check)
+     * ۳. اعتبارسنجی نسخه اسکیمای دیتابیس ورودی
+     * ۴. تهیه نسخه پشتیبان اضطراری و موقت از دیتابیس فعلی (Safety Rollback Backup) قبل از هرگونه دستکاری
+     * ۵. بستن قطعی تمام اتصالات فعال Room (Close Database Connections) جهت رهاسازی قفل‌ها
+     * ۶. پاکسازی فایل‌های ژورنال قدیمی (WAL / SHM / Journal)
+     * ۷. بازنویسی باینری مستقیم روی فایل اصلی پایگاه داده
+     * ۸. بازگشایی دیتابیس جدید و بازخوانی قطعی مشخصات فروشگاه و ارزها در حافظه و SharedPreferences
+     * ۹. در صورت بروز هرگونه خطا، رول‌بک فوری به فایل ایمن قبلی جهت جلوگیری از تخریب دیتابیس
      */
     suspend fun restoreDatabaseFromFile(context: Context, backupUri: Uri): Result<Boolean> = withContext(Dispatchers.IO) {
         Log.i(TAG, "Starting database restore from URI: $backupUri")
@@ -146,6 +166,7 @@ object DatabaseBackupHelper {
         val shmFile = File(dbDir, "$DB_NAME-shm")
         val journalFile = File(dbDir, "$DB_NAME-journal")
         val tempRestoreFile = File(dbDir, "temp_incoming_restore_${System.currentTimeMillis()}.bin")
+        val safetyBackupFile = File(dbDir, "safety_pre_restore_${System.currentTimeMillis()}.bak")
 
         try {
             // گام ۱: خواندن جریان باینری از طریق ContentResolver و نوشتن در فایل موقت
@@ -188,7 +209,7 @@ object DatabaseBackupHelper {
                 return@withContext Result.failure(IOException(errorMsg))
             }
 
-            // گام ۲: اعتبارسنجی هدر فایل برای اطمینان از باینری بودن دیتابیس SQLite
+            // گام ۲: اعتبارسنجی هدر باینری و تست یکپارچگی عمیق SQLite
             if (!verifySqliteHeader(tempRestoreFile)) {
                 tempRestoreFile.delete()
                 val errorMsg = "فایل انتخاب‌شده یک فایل معتبر دیتابیس SQLite نمی‌باشد."
@@ -196,28 +217,63 @@ object DatabaseBackupHelper {
                 return@withContext Result.failure(IllegalArgumentException(errorMsg))
             }
 
-            // گام ۳: بستن کامل و قطعی تمام ارتباطات با AppDatabase جهت رهاسازی قفل‌های سیستمی
+            val integrityResult = DatabaseSecurityManager.verifyDatabaseIntegrity(tempRestoreFile)
+            if (!integrityResult.first) {
+                tempRestoreFile.delete()
+                val errorMsg = "فایل انتخاب‌شده معتبر یا سالم نیست: ${integrityResult.second}"
+                Log.e(TAG, errorMsg)
+                return@withContext Result.failure(IllegalArgumentException(errorMsg))
+            }
+
+            // گام ۳: بررسی نسخه اسکیمای دیتابیس ورودی
+            var incomingVersion = 0
+            try {
+                android.database.sqlite.SQLiteDatabase.openDatabase(
+                    tempRestoreFile.absolutePath,
+                    null,
+                    android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+                ).use { testDb ->
+                    incomingVersion = testDb.version
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Warning checking DB version: ${e.localizedMessage}")
+            }
+
+            if (incomingVersion > 8) {
+                tempRestoreFile.delete()
+                val errorMsg = "این فایل پشتیبان مربوط به نسخه جدیدتری از نرم‌افزار (نسخه ساختار $incomingVersion) است و در نسخه فعلی قابل بازیابی نیست."
+                Log.e(TAG, errorMsg)
+                return@withContext Result.failure(IllegalArgumentException(errorMsg))
+            }
+
+            // گام ۴: ایجاد نسخه پشتیبان محافظتی (Safety Backup) از وضعیت فعلی قبل از هرگونه تغییر
+            if (currentDbPath.exists() && currentDbPath.length() > 0L) {
+                try {
+                    FileInputStream(currentDbPath).use { inStream ->
+                        FileOutputStream(safetyBackupFile).use { outStream ->
+                            inStream.copyTo(outStream, bufferSize = 32768)
+                            outStream.flush()
+                            outStream.fd.sync()
+                        }
+                    }
+                    Log.d(TAG, "Safety pre-restore backup created at ${safetyBackupFile.absolutePath}")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to create safety backup: ${e.localizedMessage}")
+                }
+            }
+
+            // گام ۵: بستن کامل اتصالات Room
             Log.i(TAG, "Closing active AppDatabase connection before overwriting file...")
             AppDatabase.closeInstance()
 
-            // گام ۴: پاکسازی کامل فایل‌های ژورنال قدیمی (WAL / SHM / Journal)
-            if (walFile.exists()) {
-                val walDeleted = walFile.delete()
-                Log.d(TAG, "Old WAL file deleted: $walDeleted")
-            }
-            if (shmFile.exists()) {
-                val shmDeleted = shmFile.delete()
-                Log.d(TAG, "Old SHM file deleted: $shmDeleted")
-            }
-            if (journalFile.exists()) {
-                val journalDeleted = journalFile.delete()
-                Log.d(TAG, "Old Journal file deleted: $journalDeleted")
-            }
+            // گام ۶: حذف فایل‌های لاگ WAL / SHM / Journal
+            if (walFile.exists()) walFile.delete()
+            if (shmFile.exists()) shmFile.delete()
+            if (journalFile.exists()) journalFile.delete()
 
-            // گام ۵: بازنویسی واقعی و باینری مستقیم روی فایل اصلی دیتابیس (Direct File Overwrite)
+            // گام ۷: بازنویسی مستقیم و باینری روی فایل اصلی دیتابیس
             if (currentDbPath.exists()) {
-                val oldDeleted = currentDbPath.delete()
-                Log.d(TAG, "Previous DB file deleted before rewrite: $oldDeleted")
+                currentDbPath.delete()
             }
 
             var writtenBytes: Long = 0
@@ -233,27 +289,65 @@ object DatabaseBackupHelper {
             Log.i(TAG, "Direct binary overwrite completed. Written bytes: $writtenBytes, Current DB size: ${currentDbPath.length()}")
 
             if (writtenBytes != bytesCopied || !currentDbPath.exists() || currentDbPath.length() == 0L) {
-                val errorMsg = "خطا در فرآیند بازنویسی دیتابیس؛ حجم فایل نهایی با فایل پشتیبان تطابق ندارد."
-                Log.e(TAG, errorMsg)
-                return@withContext Result.failure(IOException(errorMsg))
+                throw IOException("خطا در بازنویسی باینری؛ اندازه فایل نهایی تطابق ندارد.")
             }
 
-            // حذف مجدد احتمالی فایلهای کمکی تا SQLite از ابتدا با دیتابیس جدید شروع کند
+            // پاکسازی مجدد لاگ‌های موقت SQLite
             if (walFile.exists()) walFile.delete()
             if (shmFile.exists()) shmFile.delete()
             if (journalFile.exists()) journalFile.delete()
 
-            // گام ۶: بازگشایی مجدد نمونه دیتابیس Room و اجرای کوئری سلامت
+            // گام ۸: بازگشایی دیتابیس و اعتبارسنجی بازخوانی اطلاعات
             Log.i(TAG, "Reopening Room AppDatabase...")
             val newAppDb = AppDatabase.getInstance(context)
             val readableDb = newAppDb.openHelper.readableDatabase
             val dbVersion = readableDb.version
             Log.i(TAG, "Room database restored and reopened successfully. Schema version: $dbVersion")
 
+            // بازخوانی بلادرنگ مشخصات فروشگاه و ارزها از دیتابیس به حافظه فعال و تنظیمات
+            try {
+                val secManager = com.example.data.model.AppSecurityAndSettingsManager.getInstance(context)
+                secManager.reloadFromDatabase(newAppDb)
+                Log.i(TAG, "Store settings successfully reloaded from restored database.")
+            } catch (e: Exception) {
+                Log.w(TAG, "Warning reloading store settings after restore: ${e.localizedMessage}")
+            }
+
+            // حذف نسخه پشتیبان محافظتی پس از اطمینان کامل از موفقیت عملیات
+            if (safetyBackupFile.exists()) {
+                safetyBackupFile.delete()
+            }
+
             Result.success(true)
         } catch (e: Exception) {
             Log.e(TAG, "Restore operation failed with error: ${e.localizedMessage}", e)
             if (tempRestoreFile.exists()) tempRestoreFile.delete()
+
+            // فرآیند رول‌بک اضطراری (Rollback): بازگرداندن دیتابیس سالم قبلی
+            if (safetyBackupFile.exists() && safetyBackupFile.length() > 0L) {
+                try {
+                    Log.w(TAG, "Initiating emergency rollback from safety backup...")
+                    AppDatabase.closeInstance()
+                    if (currentDbPath.exists()) currentDbPath.delete()
+                    if (walFile.exists()) walFile.delete()
+                    if (shmFile.exists()) shmFile.delete()
+                    if (journalFile.exists()) journalFile.delete()
+
+                    FileInputStream(safetyBackupFile).use { inStream ->
+                        FileOutputStream(currentDbPath).use { outStream ->
+                            inStream.copyTo(outStream, bufferSize = 32768)
+                            outStream.flush()
+                            outStream.fd.sync()
+                        }
+                    }
+                    safetyBackupFile.delete()
+                    AppDatabase.getInstance(context)
+                    Log.i(TAG, "Rollback to pre-restore database state succeeded.")
+                } catch (rollbackEx: Exception) {
+                    Log.e(TAG, "Rollback failed: ${rollbackEx.localizedMessage}", rollbackEx)
+                }
+            }
+
             Result.failure(Exception("خطا در بازیابی پایگاه داده: ${e.localizedMessage ?: "فایل مخدوش یا دسترسی نامعتبر است."}"))
         }
     }

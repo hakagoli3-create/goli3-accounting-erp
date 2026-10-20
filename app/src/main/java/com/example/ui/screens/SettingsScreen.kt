@@ -1243,11 +1243,24 @@ private fun BackupAndSyncSection(
             scope.launch {
                 val result = DatabaseBackupHelper.restoreDatabaseFromFile(context, uri)
                 if (result.isSuccess) {
-                    Toast.makeText(context, "بازیابی اطلاعات با موفقیت انجام شد. در حال بارگذاری مجدد برنامه...", Toast.LENGTH_LONG).show()
-                    kotlinx.coroutines.delay(600)
-                    (context as? android.app.Activity)?.recreate()
+                    try {
+                        val appDb = AppDatabase.getInstance(context)
+                        securityManager.reloadFromDatabase(appDb)
+                    } catch (_: Exception) {}
+
+                    Toast.makeText(context, "بازیابی اطلاعات با موفقیت انجام شد. تمام سوابق مالی و مشخصات فروشگاه بازیابی شدند. در حال راه‌اندازی مجدد...", Toast.LENGTH_LONG).show()
+                    kotlinx.coroutines.delay(800)
+                    val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                    if (intent != null) {
+                        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                        context.startActivity(intent)
+                        (context as? android.app.Activity)?.finishAffinity()
+                    } else {
+                        (context as? android.app.Activity)?.recreate()
+                    }
                 } else {
-                    Toast.makeText(context, "خطا در بازیابی فایل: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                    val errorMsg = result.exceptionOrNull()?.message ?: "خطای ناشناخته در بازیابی فایل پشتیبان"
+                    Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
                 }
             }
         }

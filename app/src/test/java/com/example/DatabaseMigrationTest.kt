@@ -330,9 +330,35 @@ class DatabaseMigrationTest {
     }
 
     @Test
-    fun `test end to end sequential migration from version 1 to 7 preserves all business data`() {
+    fun `test migration 7 to 8 creates store_settings table and preserves data`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val dbName = "test_end_to_end_v1_to_v7.db"
+        val dbName = "test_mig_7_8.db"
+        context.deleteDatabase(dbName)
+
+        val helper = createHelper(context, dbName, 7) { _ -> }
+        val db = helper.writableDatabase
+
+        AppDatabase.MIGRATION_7_8.migrate(db)
+
+        // Verify table creation and insertion
+        db.execSQL("""
+            INSERT INTO store_settings (id, name, managerName, phone, mobile, address, nationalCode, economicCode, defaultBankCard, defaultSheba, taxRatePercent, wholesaleDiscountLimitPercent, currenciesJson, updatedAt)
+            VALUES (1, 'فروشگاه پایدار ۷۳۱۹', 'آقای گلی', '0211234', '0912111', 'تهران', '001122', '41122', '6037', 'IR123', 10, 25, '[]', 1700000000)
+        """.trimIndent())
+
+        db.query("SELECT name, managerName, taxRatePercent FROM store_settings WHERE id = 1").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("فروشگاه پایدار ۷۳۱۹", cursor.getString(0))
+            assertEquals("آقای گلی", cursor.getString(1))
+            assertEquals(10, cursor.getInt(2))
+        }
+        helper.close()
+    }
+
+    @Test
+    fun `test end to end sequential migration from version 1 to 8 preserves all business data`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbName = "test_end_to_end_v1_to_v8.db"
         context.deleteDatabase(dbName)
 
         val helper = createHelper(context, dbName, 1) { db ->
@@ -391,6 +417,7 @@ class DatabaseMigrationTest {
         AppDatabase.MIGRATION_4_5.migrate(db)
         AppDatabase.MIGRATION_5_6.migrate(db)
         AppDatabase.MIGRATION_6_7.migrate(db)
+        AppDatabase.MIGRATION_7_8.migrate(db)
 
         // 1. Verify v1 accounting voucher preserved
         db.query("SELECT voucherNumber, description FROM journal_entries WHERE id = 1").use { cursor ->
@@ -445,6 +472,13 @@ class DatabaseMigrationTest {
         db.query("SELECT balance FROM treasury_currency_balances WHERE accountType = 'BANK' AND accountId = 1").use { cursor ->
             assertTrue(cursor.moveToFirst())
             assertEquals(200000000.0, cursor.getDouble(0), 0.001)
+        }
+
+        // 8. Verify store_settings table created by MIGRATION_7_8
+        db.execSQL("INSERT INTO store_settings (id, name, managerName, phone, mobile, address, nationalCode, economicCode, defaultBankCard, defaultSheba, taxRatePercent, wholesaleDiscountLimitPercent, currenciesJson, updatedAt) VALUES (1, 'فروشگاه گلی', 'مدیر', '021', '0912', '', '', '', '', '', 10, 25, '[]', 1700000000)")
+        db.query("SELECT name FROM store_settings WHERE id = 1").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("فروشگاه گلی", cursor.getString(0))
         }
 
         helper.close()
