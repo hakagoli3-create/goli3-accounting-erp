@@ -25,6 +25,9 @@ interface InventoryDao {
     @Query("SELECT * FROM warehouses WHERE isDefault = 1 LIMIT 1")
     suspend fun getDefaultWarehouse(): WarehouseEntity?
 
+    @Query("SELECT * FROM warehouses ORDER BY id ASC LIMIT 1")
+    suspend fun getFirstWarehouse(): WarehouseEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertWarehouse(warehouse: WarehouseEntity): Long
 
@@ -61,6 +64,9 @@ interface InventoryDao {
 
     @Query("SELECT * FROM products WHERE id = :id LIMIT 1")
     suspend fun getProductById(id: Long): ProductEntity?
+
+    @Query("SELECT * FROM products WHERE name = :name LIMIT 1")
+    suspend fun getProductByName(name: String): ProductEntity?
 
     @Query("SELECT * FROM products WHERE name LIKE '%' || :query || '%' OR code LIKE '%' || :query || '%' OR barcode LIKE '%' || :query || '%'")
     fun searchProducts(query: String): Flow<List<ProductEntity>>

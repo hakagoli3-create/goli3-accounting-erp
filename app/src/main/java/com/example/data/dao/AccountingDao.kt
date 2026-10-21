@@ -110,8 +110,8 @@ interface AccountingDao {
         items: List<JournalItemEntity>
     ): Long {
         val nextNumber = getMaxVoucherNumber() + 1
-        val voucherId = insertJournalEntry(entry.copy(voucherNumber = nextNumber))
-        val attachedItems = items.map { it.copy(voucherId = voucherId) }
+        val voucherId = insertJournalEntry(entry.copy(id = 0L, voucherNumber = nextNumber))
+        val attachedItems = items.map { it.copy(id = 0L, voucherId = voucherId) }
         insertJournalItems(attachedItems)
         return voucherId
     }

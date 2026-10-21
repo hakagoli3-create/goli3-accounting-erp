@@ -71,8 +71,8 @@ interface InvoiceDao {
         invoice: InvoiceEntity,
         items: List<InvoiceItemEntity>
     ): Long {
-        val invoiceId = insertInvoice(invoice)
-        val attached = items.map { it.copy(invoiceId = invoiceId) }
+        val invoiceId = insertInvoice(invoice.copy(id = 0L))
+        val attached = items.map { it.copy(id = 0L, invoiceId = invoiceId) }
         insertInvoiceItems(attached)
         return invoiceId
     }

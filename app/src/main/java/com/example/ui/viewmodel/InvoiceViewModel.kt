@@ -885,8 +885,15 @@ class InvoiceViewModel(
                 clearCart()
                 onCompleted(invoiceId)
             } catch (e: Exception) {
-                android.util.Log.e("InvoiceViewModel", "Error in checkoutAdvanced", e)
-                _alertMessage.value = "خطا در ثبت نهایی سند: ${e.localizedMessage ?: "عملیات با خطا مواجه شد."}"
+                android.util.Log.e("InvoiceViewModel", "Error in checkoutAdvanced: ${e.message}", e)
+                val isForeignKeyError = e is android.database.sqlite.SQLiteConstraintException ||
+                        (e.message?.contains("FOREIGN KEY", ignoreCase = true) == true) ||
+                        (e.cause?.message?.contains("FOREIGN KEY", ignoreCase = true) == true)
+                if (isForeignKeyError) {
+                    _alertMessage.value = "خطای قید کلید خارجی در دیتابیس (SQLITE_CONSTRAINT_FOREIGNKEY): اطلاعات ارجاعی کالا یا انبار یافت نشد. به دلیل حفاظت از یکپارچگی مالی، کلیه عملیات بازگشت (Rollback) داده شد."
+                } else {
+                    _alertMessage.value = "خطا در ثبت نهایی سند: ${e.localizedMessage ?: "عملیات با خطا مواجه شد."}"
+                }
             } finally {
                 _isSubmitting.value = false
             }

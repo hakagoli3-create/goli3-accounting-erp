@@ -47,20 +47,107 @@ class InvoiceRepository(
      * ثبت کامل فاکتور به همراه آپدیت انبارداری، خزانه‌داری، مانده حساب مشتری، و صدور سند اتوماتیک دوبل حسابداری
      * با تضمین اتمیک بودن کلیه عملیات چندجدولی در یک تراکنش واحد
      */
+    /**
+     * اعتبارسنجی و تضمین انبار مقصد معتبر جهت رعایت قطعی قیود کلید خارجی
+     */
+    suspend fun resolveAndEnsureWarehouse(requestedWarehouseId: Long): Long {
+        if (requestedWarehouseId > 0) {
+            val wh = inventoryDao.getWarehouseById(requestedWarehouseId)
+            if (wh != null) return wh.id
+        }
+        val defaultWh = inventoryDao.getDefaultWarehouse()
+        if (defaultWh != null) return defaultWh.id
+
+        val anyWh = inventoryDao.getFirstWarehouse()
+        if (anyWh != null) return anyWh.id
+
+        return try {
+            inventoryDao.insertWarehouse(
+                com.example.data.model.WarehouseEntity(
+                    code = "WH-01",
+                    name = "انبار مرکزی",
+                    isDefault = true
+                )
+            )
+        } catch (e: Exception) {
+            inventoryDao.getFirstWarehouse()?.id ?: 1L
+        }
+    }
+
+    /**
+     * اعتبارسنجی و حل تک‌تک اقلام فاکتور تا تضمین شود تمام شناسه‌های کالا در جدول products وجود دارند
+     */
+    suspend fun resolveAndEnsureProducts(
+        items: List<InvoiceItemEntity>,
+        invoiceType: String
+    ): List<InvoiceItemEntity> {
+        return items.map { item ->
+            val resolvedProductId = resolveSingleProduct(item, invoiceType)
+            item.copy(id = 0L, productId = resolvedProductId)
+        }
+    }
+
+    suspend fun resolveSingleProduct(item: InvoiceItemEntity, invoiceType: String): Long {
+        if (item.productId > 0) {
+            val existing = inventoryDao.getProductById(item.productId)
+            if (existing != null) return existing.id
+        }
+        if (item.barcode.isNotBlank()) {
+            val byBarcode = inventoryDao.getProductByBarcode(item.barcode.trim())
+            if (byBarcode != null) return byBarcode.id
+        }
+        val byName = inventoryDao.getProductByName(item.productName.trim())
+        if (byName != null) return byName.id
+
+        // در صورتی که کالا هنوز در دیتابیس ثبت نشده باشد (مثلاً کالای سریع یا شناسه صفر)،
+        // کالا ابتدا در جدول products ثبت می‌شود تا کلید خارجی در inventory_movements نقض نگردد.
+        val codeGen = if (item.barcode.isNotBlank()) "PRD-${item.barcode.trim()}" else "PRD-${System.currentTimeMillis() % 100000}"
+        val isPurchase = invoiceType in listOf("PURCHASE", "RETURN_PURCHASE")
+        val buyPrice = if (isPurchase) item.unitPrice else (item.unitPrice * 0.75).toLong()
+
+        val newProduct = com.example.data.model.ProductEntity(
+            code = codeGen,
+            barcode = item.barcode.trim(),
+            name = item.productName.ifBlank { "کالای عمومی" },
+            category = "عمومی",
+            primaryUnit = if (item.isPrimaryUnit) item.unitName else "کارتن",
+            secondaryUnit = if (!item.isPrimaryUnit) item.unitName else "عدد",
+            conversionRate = if (item.conversionRate > 0) item.conversionRate else 1.0,
+            buyPrice = maxOf(0L, buyPrice),
+            retailPrice = maxOf(0L, item.unitPrice),
+            wholesalePrice = maxOf(0L, item.unitPrice),
+            currentStockInSecondary = 0.0
+        )
+        return inventoryDao.insertProduct(newProduct)
+    }
+
+    /**
+     * ثبت کامل فاکتور به همراه آپدیت انبارداری، خزانه‌داری، مانده حساب مشتری، و صدور سند اتوماتیک دوبل حسابداری
+     * با تضمین اتمیک بودن کلیه عملیات چندجدولی در یک تراکنش واحد و رعایت قیود کلید خارجی
+     */
     suspend fun createInvoice(
         invoice: InvoiceEntity,
         items: List<InvoiceItemEntity>,
         cheque: com.example.data.model.ChequeEntity? = null
     ): Long = runInTransaction {
-        val invoiceId = invoiceDao.createInvoiceWithItems(invoice, items)
+        try {
+            val validWarehouseId = resolveAndEnsureWarehouse(invoice.warehouseId)
+            val resolvedItems = resolveAndEnsureProducts(items, invoice.invoiceType)
+            val readyInvoice = invoice.copy(id = 0L, warehouseId = validWarehouseId)
 
-        // اگر پیش‌فاکتور (PROFORMA) باشد، از انبار کسر نمی‌شود و سند قطعی حسابداری صادر نمی‌گردد
-        if (invoice.status == "PROFORMA") {
-            return@runInTransaction invoiceId
+            val invoiceId = invoiceDao.createInvoiceWithItems(readyInvoice, resolvedItems)
+
+            // اگر پیش‌فاکتور (PROFORMA) باشد، از انبار کسر نمی‌شود و سند قطعی حسابداری صادر نمی‌گردد
+            if (readyInvoice.status == "PROFORMA") {
+                return@runInTransaction invoiceId
+            }
+
+            applyInvoiceEffects(readyInvoice.copy(id = invoiceId), resolvedItems, cheque, validWarehouseId)
+            invoiceId
+        } catch (e: Exception) {
+            android.util.Log.e("InvoiceRepository", "Error creating invoice: ${e.message}", e)
+            throw e
         }
-
-        applyInvoiceEffects(invoice.copy(id = invoiceId), items, cheque)
-        invoiceId
     }
 
     /**
@@ -69,22 +156,10 @@ class InvoiceRepository(
     private suspend fun applyInvoiceEffects(
         invoice: InvoiceEntity,
         items: List<InvoiceItemEntity>,
-        cheque: com.example.data.model.ChequeEntity? = null
+        cheque: com.example.data.model.ChequeEntity? = null,
+        warehouseIdOverride: Long? = null
     ) {
-        // اطمینان از وجود انبار معتبر جهت رعایت کامل قیود کلید خارجی
-        val validWarehouseId = try {
-            val wh = inventoryDao.getWarehouseById(invoice.warehouseId)
-                ?: inventoryDao.getDefaultWarehouse()
-            wh?.id ?: inventoryDao.insertWarehouse(
-                com.example.data.model.WarehouseEntity(
-                    code = "WH-01",
-                    name = "انبار مرکزی",
-                    isDefault = true
-                )
-            )
-        } catch (e: Exception) {
-            1L
-        }
+        val validWarehouseId = warehouseIdOverride ?: resolveAndEnsureWarehouse(invoice.warehouseId)
 
         // 1. به روزرسانی کاردکس و موجودی انبار برای هر قلم
         for (item in items) {
@@ -96,9 +171,15 @@ class InvoiceRepository(
                 else -> -item.quantityInSecondary
             }
 
+            val validProductId = if (item.productId > 0 && inventoryDao.getProductById(item.productId) != null) {
+                item.productId
+            } else {
+                resolveSingleProduct(item, invoice.invoiceType)
+            }
+
             inventoryDao.insertMovement(
                 InventoryMovementEntity(
-                    productId = item.productId,
+                    productId = validProductId,
                     warehouseId = validWarehouseId,
                     jalaliDate = invoice.jalaliDate,
                     documentType = invoice.invoiceType,
@@ -108,7 +189,7 @@ class InvoiceRepository(
                     description = "فاکتور ${invoice.invoiceNumber} (${invoice.invoiceType}) - ${item.productName}"
                 )
             )
-            inventoryDao.adjustStock(item.productId, stockDelta)
+            inventoryDao.adjustStock(validProductId, stockDelta)
         }
 
         // 2. مقادیر بر مبنای نرخ تسعیر ذخیره‌شده فاکتور با دقت محاسباتی بالا (BigDecimal)
@@ -403,13 +484,7 @@ class InvoiceRepository(
      */
     private suspend fun rollbackInvoiceEffects(invoice: InvoiceEntity, items: List<InvoiceItemEntity>) {
         // 1. معکوس کردن کاردکس انبار با اعتبارسنجی انبار و کالا جهت جلوگیری از خطای Foreign Key
-        val targetWarehouseId = try {
-            val wh = inventoryDao.getWarehouseById(invoice.warehouseId)
-                ?: inventoryDao.getDefaultWarehouse()
-            wh?.id ?: 1L
-        } catch (e: Exception) {
-            1L
-        }
+        val targetWarehouseId = resolveAndEnsureWarehouse(invoice.warehouseId)
 
         for (item in items) {
             val reverseStock = when (invoice.invoiceType) {
@@ -717,16 +792,19 @@ class InvoiceRepository(
                 android.util.Log.e("InvoiceRepository", "Error clearing existing cheques on update", e)
             }
 
+            val validWarehouseId = resolveAndEnsureWarehouse(updatedInvoice.warehouseId)
+            val resolvedItems = resolveAndEnsureProducts(newItems, updatedInvoice.invoiceType)
+
             // ثبت اطلاعات جدید فاکتور
-            val readyInvoice = updatedInvoice.copy(id = invoiceId)
+            val readyInvoice = updatedInvoice.copy(id = invoiceId, warehouseId = validWarehouseId)
             invoiceDao.updateInvoice(readyInvoice)
             invoiceDao.deleteInvoiceItemsForInvoice(invoiceId)
-            val attachedItems = newItems.map { it.copy(invoiceId = invoiceId) }
+            val attachedItems = resolvedItems.map { it.copy(id = 0L, invoiceId = invoiceId) }
             invoiceDao.insertInvoiceItems(attachedItems)
 
             // اعمال مجدد اثرات فاکتور در صورتی که قطعی باشد
             if (readyInvoice.status == "FINAL") {
-                applyInvoiceEffects(readyInvoice, attachedItems, cheque)
+                applyInvoiceEffects(readyInvoice, attachedItems, cheque, validWarehouseId)
             }
             true
         } catch (e: Exception) {
@@ -742,11 +820,11 @@ class InvoiceRepository(
         try {
             val invoiceWithItems = invoiceDao.getInvoiceWithItemsById(invoiceId) ?: return@runInTransaction false
             val invoice = invoiceWithItems.invoice
-            if (invoice.status != "PROFORMA") return@runInTransaction false
-
-            val updatedInvoice = invoice.copy(status = "FINAL")
+            val validWarehouseId = resolveAndEnsureWarehouse(invoice.warehouseId)
+            val resolvedItems = resolveAndEnsureProducts(invoiceWithItems.items, invoice.invoiceType)
+            val updatedInvoice = invoice.copy(status = "FINAL", warehouseId = validWarehouseId)
             invoiceDao.updateInvoice(updatedInvoice)
-            applyInvoiceEffects(updatedInvoice, invoiceWithItems.items)
+            applyInvoiceEffects(updatedInvoice, resolvedItems, null, validWarehouseId)
             true
         } catch (e: Exception) {
             android.util.Log.e("InvoiceRepository", "Error converting proforma to final", e)

@@ -19,6 +19,9 @@ interface TreasuryDao {
     @Query("SELECT * FROM cash_desks ORDER BY id ASC")
     fun getAllCashDesks(): Flow<List<CashDeskEntity>>
 
+    @Query("SELECT * FROM cash_desks ORDER BY id ASC LIMIT 1")
+    suspend fun getFirstCashDesk(): CashDeskEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCashDesk(cashDesk: CashDeskEntity): Long
 
@@ -40,6 +43,9 @@ interface TreasuryDao {
     // Bank Accounts
     @Query("SELECT * FROM bank_accounts ORDER BY id ASC")
     fun getAllBankAccounts(): Flow<List<BankAccountEntity>>
+
+    @Query("SELECT * FROM bank_accounts ORDER BY id ASC LIMIT 1")
+    suspend fun getFirstBankAccount(): BankAccountEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertBankAccount(bankAccount: BankAccountEntity): Long

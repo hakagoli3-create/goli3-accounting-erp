@@ -360,11 +360,12 @@ fun InvoiceScreen(
                             Toast.makeText(context, "طرف‌حساب «${created.name}» با موفقیت افزوده و انتخاب شد.", Toast.LENGTH_SHORT).show()
                         }
                     },
-                    onQuickAddOrUpdateProduct = { prod ->
+                    onQuickAddOrUpdateProduct = { prod, onSaved ->
                         viewModel.quickAddOrUpdateProduct(prod) { saved ->
                             val isNew = prod.id == 0L
                             val msg = if (isNew) "کالای «${saved.name}» با موفقیت ثبت و انتخاب شد." else "کالای «${saved.name}» بروزرسانی شد."
                             Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                            onSaved(saved)
                         }
                     }
                 )
@@ -1528,7 +1529,7 @@ private fun InvoiceEditorContent(
     onCancelEditing: () -> Unit,
     onOpenSettlement: () -> Unit,
     onQuickAddParty: (PartyEntity) -> Unit,
-    onQuickAddOrUpdateProduct: (ProductEntity) -> Unit
+    onQuickAddOrUpdateProduct: (ProductEntity, (ProductEntity) -> Unit) -> Unit = { _, _ -> }
 ) {
     var partyMenuExpanded by remember { mutableStateOf(false) }
     var productMenuExpanded by remember { mutableStateOf(false) }
@@ -2283,8 +2284,9 @@ private fun InvoiceEditorContent(
             onDismiss = { showQuickAddProductDialog = false },
             onConfirm = { product ->
                 showQuickAddProductDialog = false
-                onQuickAddOrUpdateProduct(product)
-                selectedProductToAdd = product
+                onQuickAddOrUpdateProduct(product) { saved ->
+                    selectedProductToAdd = saved
+                }
             }
         )
     }
