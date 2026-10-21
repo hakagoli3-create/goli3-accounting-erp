@@ -57,8 +57,18 @@ enum class TreasuryDateFilter(val title: String) {
 class TreasuryViewModel(
     private val repository: TreasuryRepository,
     private val accountingRepo: AccountingRepository,
-    private val expenseRepo: ExpenseAndIncomeRepository
+    private val expenseRepo: ExpenseAndIncomeRepository,
+    private val partyRepo: com.example.data.repository.PartyRepository
 ) : ViewModel() {
+
+    val allParties: StateFlow<List<com.example.data.model.PartyEntity>> = partyRepo.allParties
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allExpenseCategories: StateFlow<List<com.example.data.model.ExpenseCategoryEntity>> = expenseRepo.allExpenseCategories
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allIncomeCategories: StateFlow<List<com.example.data.model.IncomeCategoryEntity>> = expenseRepo.allIncomeCategories
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val allCashDesks: StateFlow<List<CashDeskEntity>> = repository.allCashDesks
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -321,6 +331,584 @@ class TreasuryViewModel(
                 onSuccess()
             } catch (e: Exception) {
                 _statusMessage.value = "امکان حذف این چک وجود ندارد."
+            }
+        }
+    }
+
+    fun quickAddParty(party: com.example.data.model.PartyEntity, onSuccess: (com.example.data.model.PartyEntity) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val code = if (party.code.isBlank()) "PRT-${System.currentTimeMillis() % 100000}" else party.code
+                val toInsert = party.copy(code = code)
+                val id = partyRepo.insertParty(toInsert)
+                val created = toInsert.copy(id = id)
+                _statusMessage.value = "طرف‌حساب جدید «${created.name}» با موفقیت تعریف و انتخاب شد."
+                onSuccess(created)
+            } catch (e: Exception) {
+                _statusMessage.value = "خطا در تعریف طرف‌حساب: ${e.localizedMessage}"
+            }
+        }
+    }
+
+    fun quickAddExpenseCategory(title: String, description: String = "", onSuccess: (com.example.data.model.ExpenseCategoryEntity) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val code = "EXP-${System.currentTimeMillis() % 10000}"
+                val cat = com.example.data.model.ExpenseCategoryEntity(code = code, title = title.trim(), description = description.trim())
+                val id = expenseRepo.insertExpenseCategory(cat)
+                val created = cat.copy(id = id)
+                _statusMessage.value = "سرفصل هزینه «${created.title}» افزوده شد."
+                onSuccess(created)
+            } catch (e: Exception) {
+                _statusMessage.value = "خطا در افزودن سرفصل هزینه: ${e.localizedMessage}"
+            }
+        }
+    }
+
+    fun quickAddIncomeCategory(title: String, description: String = "", onSuccess: (com.example.data.model.IncomeCategoryEntity) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val code = "INC-${System.currentTimeMillis() % 10000}"
+                val cat = com.example.data.model.IncomeCategoryEntity(code = code, title = title.trim(), description = description.trim())
+                val id = expenseRepo.insertIncomeCategory(cat)
+                val created = cat.copy(id = id)
+                _statusMessage.value = "سرفصل درآمد «${created.title}» افزوده شد."
+                onSuccess(created)
+            } catch (e: Exception) {
+                _statusMessage.value = "خطا در افزودن سرفصل درآمد: ${e.localizedMessage}"
+            }
+        }
+    }
+
+    fun registerCashReceipt(
+        isPartyReceipt: Boolean,
+        partyId: Long?,
+        partyName: String,
+        incomeCategoryId: Long?,
+        incomeCategoryTitle: String,
+        title: String,
+        amount: Long,
+        destinationType: String, // "CASH" or "BANK"
+        targetId: Long,
+        jalaliDate: String,
+        trackingNumber: String = "",
+        notes: String = "",
+        onSuccess: () -> Unit
+    ) {
+        viewModelScope.launch {
+            if (amount <= 0) {
+                _statusMessage.value = "مبلغ دریافتی باید بیشتر از صفر باشد."
+                return@launch
+            }
+            try {
+                val destName = if (destinationType == "CASH") {
+                    allCashDesks.value.firstOrNull { it.id == targetId }?.name ?: "صندوق نقدی"
+                } else {
+                    allBankAccounts.value.firstOrNull { it.id == targetId }?.bankName ?: "حساب بانکی"
+                }
+
+                val destSubCode = if (destinationType == "CASH") 10101 else 10102
+                val trackingText = if (trackingNumber.isNotBlank()) " | پیگیری: $trackingNumber" else ""
+                val notesText = if (notes.isNotBlank()) " ($notes)" else ""
+                val todayDate = if (jalaliDate.isNotBlank()) jalaliDate else JalaliDate.now().toStandardString()
+
+                if (isPartyReceipt && partyId != null) {
+                    val voucherDescription = "دریافت وجه از طرف‌حساب $partyName و واریز به $destName$trackingText$notesText"
+                    val journalItems = listOf(
+                        JournalItemEntity(
+                            voucherId = 0L,
+                            generalCode = 101,
+                            subsidiaryCode = destSubCode,
+                            partyId = null,
+                            description = "واریز وجه به $destName بابت تسویه/دریافت از $partyName$trackingText",
+                            debit = amount,
+                            credit = 0L
+                        ),
+                        JournalItemEntity(
+                            voucherId = 0L,
+                            generalCode = 102,
+                            subsidiaryCode = 10201,
+                            partyId = partyId,
+                            description = "تسویه/دریافت وجه توسط $partyName به $destName$trackingText",
+                            debit = 0L,
+                            credit = amount
+                        )
+                    )
+
+                    val voucherResult = accountingRepo.createJournalVoucher(
+                        JournalEntryEntity(
+                            voucherNumber = 0L,
+                            jalaliDate = todayDate,
+                            description = voucherDescription,
+                            isBalanced = true,
+                            status = "FINAL"
+                        ),
+                        journalItems
+                    )
+                    val voucherId = voucherResult.getOrNull()
+
+                    if (destinationType == "CASH") {
+                        repository.updateCashBalance(targetId, amount)
+                    } else {
+                        repository.updateBankBalance(targetId, amount)
+                    }
+
+                    partyRepo.updatePartyBalance(partyId, -amount)
+
+                    expenseRepo.insertDirectIncome(
+                        IncomeEntity(
+                            categoryId = incomeCategoryId ?: 1L,
+                            categoryTitle = "دریافت از طرف‌حساب: $partyName",
+                            amount = amount,
+                            jalaliDate = todayDate,
+                            timestamp = System.currentTimeMillis(),
+                            depositMethod = destinationType,
+                            cashDeskId = if (destinationType == "CASH") targetId else null,
+                            bankAccountId = if (destinationType == "BANK") targetId else null,
+                            accountName = destName,
+                            title = title.ifBlank { "دریافت وجه از $partyName" },
+                            notes = "$voucherDescription ${if (trackingNumber.isNotBlank()) " | فیش: $trackingNumber" else ""}".trim(),
+                            voucherId = voucherId
+                        )
+                    )
+
+                    _statusMessage.value = "دریافت وجه مبلغ ${NumberFormatUtils.formatPrice(amount)} از «$partyName» با موفقیت ثبت شد."
+                } else {
+                    val catTitle = incomeCategoryTitle.ifBlank { "درآمدهای متفرقه" }
+                    val incEntity = IncomeEntity(
+                        categoryId = incomeCategoryId ?: 1L,
+                        categoryTitle = catTitle,
+                        amount = amount,
+                        jalaliDate = todayDate,
+                        timestamp = System.currentTimeMillis(),
+                        depositMethod = destinationType,
+                        cashDeskId = if (destinationType == "CASH") targetId else null,
+                        bankAccountId = if (destinationType == "BANK") targetId else null,
+                        accountName = destName,
+                        title = title.ifBlank { "دریافت درآمد $catTitle" },
+                        notes = "$notes $trackingText".trim()
+                    )
+                    expenseRepo.createIncome(incEntity)
+                    _statusMessage.value = "درآمد «${incEntity.title}» به مبلغ ${NumberFormatUtils.formatPrice(amount)} با موفقیت ثبت شد."
+                }
+                onSuccess()
+            } catch (e: Exception) {
+                _statusMessage.value = "خطا در ثبت دریافت وجه: ${e.localizedMessage}"
+            }
+        }
+    }
+
+    fun registerCashPayment(
+        isPartyPayment: Boolean,
+        partyId: Long?,
+        partyName: String,
+        expenseCategoryId: Long?,
+        expenseCategoryTitle: String,
+        title: String,
+        amount: Long,
+        sourceType: String, // "CASH" or "BANK"
+        sourceId: Long,
+        jalaliDate: String,
+        trackingNumber: String = "",
+        notes: String = "",
+        onSuccess: () -> Unit
+    ) {
+        viewModelScope.launch {
+            if (amount <= 0) {
+                _statusMessage.value = "مبلغ پرداختی باید بیشتر از صفر باشد."
+                return@launch
+            }
+            try {
+                val srcName = if (sourceType == "CASH") {
+                    allCashDesks.value.firstOrNull { it.id == sourceId }?.name ?: "صندوق نقدی"
+                } else {
+                    allBankAccounts.value.firstOrNull { it.id == sourceId }?.bankName ?: "حساب بانکی"
+                }
+
+                val srcSubCode = if (sourceType == "CASH") 10101 else 10102
+                val trackingText = if (trackingNumber.isNotBlank()) " | پیگیری: $trackingNumber" else ""
+                val notesText = if (notes.isNotBlank()) " ($notes)" else ""
+                val todayDate = if (jalaliDate.isNotBlank()) jalaliDate else JalaliDate.now().toStandardString()
+
+                if (isPartyPayment && partyId != null) {
+                    val voucherDescription = "پرداخت وجه به طرف‌حساب $partyName از $srcName$trackingText$notesText"
+                    val journalItems = listOf(
+                        JournalItemEntity(
+                            voucherId = 0L,
+                            generalCode = 301,
+                            subsidiaryCode = 30101,
+                            partyId = partyId,
+                            description = "پرداخت وجه به $partyName از $srcName$trackingText",
+                            debit = amount,
+                            credit = 0L
+                        ),
+                        JournalItemEntity(
+                            voucherId = 0L,
+                            generalCode = 101,
+                            subsidiaryCode = srcSubCode,
+                            partyId = null,
+                            description = "خروج وجه از $srcName بابت پرداخت به $partyName$trackingText",
+                            debit = 0L,
+                            credit = amount
+                        )
+                    )
+
+                    val voucherResult = accountingRepo.createJournalVoucher(
+                        JournalEntryEntity(
+                            voucherNumber = 0L,
+                            jalaliDate = todayDate,
+                            description = voucherDescription,
+                            isBalanced = true,
+                            status = "FINAL"
+                        ),
+                        journalItems
+                    )
+                    val voucherId = voucherResult.getOrNull()
+
+                    if (sourceType == "CASH") {
+                        repository.updateCashBalance(sourceId, -amount)
+                    } else {
+                        repository.updateBankBalance(sourceId, -amount)
+                    }
+
+                    partyRepo.updatePartyBalance(partyId, amount)
+
+                    expenseRepo.insertDirectExpense(
+                        ExpenseEntity(
+                            categoryId = expenseCategoryId ?: 1L,
+                            categoryTitle = "پرداخت به طرف‌حساب: $partyName",
+                            amount = amount,
+                            jalaliDate = todayDate,
+                            timestamp = System.currentTimeMillis(),
+                            paymentMethod = sourceType,
+                            cashDeskId = if (sourceType == "CASH") sourceId else null,
+                            bankAccountId = if (sourceType == "BANK") sourceId else null,
+                            accountName = srcName,
+                            title = title.ifBlank { "پرداخت وجه به $partyName" },
+                            notes = "$voucherDescription ${if (trackingNumber.isNotBlank()) " | ارجاع: $trackingNumber" else ""}".trim(),
+                            voucherId = voucherId
+                        )
+                    )
+
+                    _statusMessage.value = "پرداخت وجه مبلغ ${NumberFormatUtils.formatPrice(amount)} به «$partyName» با موفقیت انجام شد."
+                } else {
+                    val catTitle = expenseCategoryTitle.ifBlank { "هزینه عمومی" }
+                    val expEntity = ExpenseEntity(
+                        categoryId = expenseCategoryId ?: 1L,
+                        categoryTitle = catTitle,
+                        amount = amount,
+                        jalaliDate = todayDate,
+                        timestamp = System.currentTimeMillis(),
+                        paymentMethod = sourceType,
+                        cashDeskId = if (sourceType == "CASH") sourceId else null,
+                        bankAccountId = if (sourceType == "BANK") sourceId else null,
+                        accountName = srcName,
+                        title = title.ifBlank { "پرداخت هزینه $catTitle" },
+                        notes = "$notes $trackingText".trim()
+                    )
+                    expenseRepo.createExpense(expEntity)
+                    _statusMessage.value = "پرداخت هزینه «${expEntity.title}» به مبلغ ${NumberFormatUtils.formatPrice(amount)} با موفقیت ثبت شد."
+                }
+                onSuccess()
+            } catch (e: Exception) {
+                _statusMessage.value = "خطا در ثبت پرداخت وجه: ${e.localizedMessage}"
+            }
+        }
+    }
+
+    fun registerChequeWithAccounting(
+        chequeNumber: String,
+        sayadNumber: String,
+        type: String, // "RECEIVABLE" or "PAYABLE"
+        partyId: Long?,
+        partyName: String,
+        bankName: String,
+        branch: String,
+        amount: Long,
+        issueDate: String,
+        dueDate: String,
+        notes: String,
+        onSuccess: () -> Unit
+    ) {
+        viewModelScope.launch {
+            if (amount <= 0 || chequeNumber.isBlank() || bankName.isBlank()) {
+                _statusMessage.value = "لطفاً شماره چک، بانک و مبلغ را به درستی وارد نمایید."
+                return@launch
+            }
+            try {
+                val dueJalali = JalaliDate.parse(dueDate)
+                val cheque = ChequeEntity(
+                    chequeNumber = chequeNumber.trim(),
+                    sayadNumber = sayadNumber.trim(),
+                    type = type,
+                    partyId = partyId,
+                    partyName = partyName.trim(),
+                    bankName = bankName.trim(),
+                    branch = branch.trim(),
+                    amount = amount,
+                    issueDateJalali = issueDate,
+                    dueDateJalali = dueDate,
+                    dueDateEpochMillis = dueJalali.toEpochMillis(),
+                    status = "NORMAL",
+                    notes = notes
+                )
+                repository.insertCheque(cheque)
+
+                if (partyId != null) {
+                    if (type == "RECEIVABLE") {
+                        val items = listOf(
+                            JournalItemEntity(
+                                voucherId = 0L,
+                                generalCode = 102,
+                                subsidiaryCode = 10202,
+                                partyId = null,
+                                description = "دریافت چک صیادی شماره $chequeNumber بانک $bankName سررسید $dueDate از $partyName",
+                                debit = amount,
+                                credit = 0L
+                            ),
+                            JournalItemEntity(
+                                voucherId = 0L,
+                                generalCode = 102,
+                                subsidiaryCode = 10201,
+                                partyId = partyId,
+                                description = "تسویه با چک صیادی شماره $chequeNumber سررسید $dueDate توسط $partyName",
+                                debit = 0L,
+                                credit = amount
+                            )
+                        )
+                        accountingRepo.createJournalVoucher(
+                            JournalEntryEntity(
+                                voucherNumber = 0L,
+                                jalaliDate = issueDate,
+                                description = "سند دریافت چک صیادی شماره $chequeNumber از $partyName",
+                                isBalanced = true,
+                                status = "FINAL"
+                            ),
+                            items
+                        )
+                        partyRepo.updatePartyBalance(partyId, -amount)
+                    } else {
+                        val items = listOf(
+                            JournalItemEntity(
+                                voucherId = 0L,
+                                generalCode = 301,
+                                subsidiaryCode = 30101,
+                                partyId = partyId,
+                                description = "پرداخت با چک صیادی شماره $chequeNumber سررسید $dueDate در وجه $partyName",
+                                debit = amount,
+                                credit = 0L
+                            ),
+                            JournalItemEntity(
+                                voucherId = 0L,
+                                generalCode = 301,
+                                subsidiaryCode = 30102,
+                                partyId = null,
+                                description = "صدور چک صیادی پرداختنی شماره $chequeNumber سررسید $dueDate در وجه $partyName",
+                                debit = 0L,
+                                credit = amount
+                            )
+                        )
+                        accountingRepo.createJournalVoucher(
+                            JournalEntryEntity(
+                                voucherNumber = 0L,
+                                jalaliDate = issueDate,
+                                description = "سند صدور چک صیادی پرداختنی شماره $chequeNumber در وجه $partyName",
+                                isBalanced = true,
+                                status = "FINAL"
+                            ),
+                            items
+                        )
+                        partyRepo.updatePartyBalance(partyId, amount)
+                    }
+                }
+
+                _statusMessage.value = "چک صیادی شماره $chequeNumber با موفقیت ثبت و اسناد حسابداری معین اعمال شد."
+                onSuccess()
+            } catch (e: Exception) {
+                _statusMessage.value = "خطا در ثبت چک صیادی: ${e.localizedMessage}"
+            }
+        }
+    }
+
+    fun clearChequeWithAccounting(
+        cheque: ChequeEntity,
+        targetAccountType: String, // "BANK" or "CASH"
+        targetAccountId: Long,
+        onSuccess: () -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                val accName = if (targetAccountType == "CASH") {
+                    allCashDesks.value.firstOrNull { it.id == targetAccountId }?.name ?: "صندوق"
+                } else {
+                    allBankAccounts.value.firstOrNull { it.id == targetAccountId }?.bankName ?: "بانک"
+                }
+                val accSubCode = if (targetAccountType == "CASH") 10101 else 10102
+                val todayStr = JalaliDate.now().toStandardString()
+
+                if (cheque.type == "RECEIVABLE") {
+                    val items = listOf(
+                        JournalItemEntity(
+                            voucherId = 0L,
+                            generalCode = 101,
+                            subsidiaryCode = accSubCode,
+                            partyId = null,
+                            description = "واریز وصولی چک شماره ${cheque.chequeNumber} از ${cheque.partyName} به $accName",
+                            debit = cheque.amount,
+                            credit = 0L
+                        ),
+                        JournalItemEntity(
+                            voucherId = 0L,
+                            generalCode = 102,
+                            subsidiaryCode = 10202,
+                            partyId = cheque.partyId,
+                            description = "وصول و خارج شدن چک دریافتی شماره ${cheque.chequeNumber} از اسناد در جریان",
+                            debit = 0L,
+                            credit = cheque.amount
+                        )
+                    )
+                    accountingRepo.createJournalVoucher(
+                        JournalEntryEntity(
+                            voucherNumber = 0L,
+                            jalaliDate = todayStr,
+                            description = "سند وصول چک صیادی شماره ${cheque.chequeNumber} و واریز به $accName",
+                            isBalanced = true,
+                            status = "FINAL"
+                        ),
+                        items
+                    )
+                    if (targetAccountType == "CASH") {
+                        repository.updateCashBalance(targetAccountId, cheque.amount)
+                    } else {
+                        repository.updateBankBalance(targetAccountId, cheque.amount)
+                    }
+                } else {
+                    val items = listOf(
+                        JournalItemEntity(
+                            voucherId = 0L,
+                            generalCode = 301,
+                            subsidiaryCode = 30102,
+                            partyId = cheque.partyId,
+                            description = "تسویه و پاس شدن چک پرداختی شماره ${cheque.chequeNumber} در وجه ${cheque.partyName}",
+                            debit = cheque.amount,
+                            credit = 0L
+                        ),
+                        JournalItemEntity(
+                            voucherId = 0L,
+                            generalCode = 101,
+                            subsidiaryCode = accSubCode,
+                            partyId = null,
+                            description = "برداشت از $accName بابت پاس شدن چک شماره ${cheque.chequeNumber}",
+                            debit = 0L,
+                            credit = cheque.amount
+                        )
+                    )
+                    accountingRepo.createJournalVoucher(
+                        JournalEntryEntity(
+                            voucherNumber = 0L,
+                            jalaliDate = todayStr,
+                            description = "سند پاس شدن چک صیادی پرداختی شماره ${cheque.chequeNumber} از $accName",
+                            isBalanced = true,
+                            status = "FINAL"
+                        ),
+                        items
+                    )
+                    if (targetAccountType == "CASH") {
+                        repository.updateCashBalance(targetAccountId, -cheque.amount)
+                    } else {
+                        repository.updateBankBalance(targetAccountId, -cheque.amount)
+                    }
+                }
+
+                repository.updateCheque(cheque.copy(status = "PASSED"))
+                _statusMessage.value = "چک شماره ${cheque.chequeNumber} با موفقیت وصول شد و موجودی $accName به‌روز گردید."
+                onSuccess()
+            } catch (e: Exception) {
+                _statusMessage.value = "خطا در وصول چک: ${e.localizedMessage}"
+            }
+        }
+    }
+
+    fun bounceChequeWithAccounting(
+        cheque: ChequeEntity,
+        onSuccess: () -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                val todayStr = JalaliDate.now().toStandardString()
+                if (cheque.partyId != null) {
+                    if (cheque.type == "RECEIVABLE") {
+                        val items = listOf(
+                            JournalItemEntity(
+                                voucherId = 0L,
+                                generalCode = 102,
+                                subsidiaryCode = 10201,
+                                partyId = cheque.partyId,
+                                description = "برگشت چک صیادی شماره ${cheque.chequeNumber} و احیای بدهی ${cheque.partyName}",
+                                debit = cheque.amount,
+                                credit = 0L
+                            ),
+                            JournalItemEntity(
+                                voucherId = 0L,
+                                generalCode = 102,
+                                subsidiaryCode = 10202,
+                                partyId = null,
+                                description = "خروج چک برگشتی شماره ${cheque.chequeNumber} از اسناد در جریان",
+                                debit = 0L,
+                                credit = cheque.amount
+                            )
+                        )
+                        accountingRepo.createJournalVoucher(
+                            JournalEntryEntity(
+                                voucherNumber = 0L,
+                                jalaliDate = todayStr,
+                                description = "سند برگشت چک صیادی شماره ${cheque.chequeNumber} طرف‌حساب ${cheque.partyName}",
+                                isBalanced = true,
+                                status = "FINAL"
+                            ),
+                            items
+                        )
+                        partyRepo.updatePartyBalance(cheque.partyId, cheque.amount)
+                    } else {
+                        val items = listOf(
+                            JournalItemEntity(
+                                voucherId = 0L,
+                                generalCode = 301,
+                                subsidiaryCode = 30102,
+                                partyId = null,
+                                description = "ابطال چک پرداختی شماره ${cheque.chequeNumber}",
+                                debit = cheque.amount,
+                                credit = 0L
+                            ),
+                            JournalItemEntity(
+                                voucherId = 0L,
+                                generalCode = 301,
+                                subsidiaryCode = 30101,
+                                partyId = cheque.partyId,
+                                description = "احیای بستانکاری ${cheque.partyName} بابت ابطال چک شماره ${cheque.chequeNumber}",
+                                debit = 0L,
+                                credit = cheque.amount
+                            )
+                        )
+                        accountingRepo.createJournalVoucher(
+                            JournalEntryEntity(
+                                voucherNumber = 0L,
+                                jalaliDate = todayStr,
+                                description = "سند ابطال چک صیادی پرداختی شماره ${cheque.chequeNumber} در وجه ${cheque.partyName}",
+                                isBalanced = true,
+                                status = "FINAL"
+                            ),
+                            items
+                        )
+                        partyRepo.updatePartyBalance(cheque.partyId, -cheque.amount)
+                    }
+                }
+
+                repository.updateCheque(cheque.copy(status = "BOUNCED"))
+                _statusMessage.value = "وضعیت چک شماره ${cheque.chequeNumber} به «برگشت خورده» تغییر یافت و حساب طرف‌حساب به‌روز شد."
+                onSuccess()
+            } catch (e: Exception) {
+                _statusMessage.value = "خطا در ثبت برگشت چک: ${e.localizedMessage}"
             }
         }
     }

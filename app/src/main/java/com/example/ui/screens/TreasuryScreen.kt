@@ -152,6 +152,10 @@ fun TreasuryScreen(
     val totalBank by viewModel.totalBankBalance.collectAsStateWithLifecycle()
     val statusMessage by viewModel.statusMessage.collectAsStateWithLifecycle()
 
+    val parties by viewModel.allParties.collectAsStateWithLifecycle()
+    val expenseCategories by viewModel.allExpenseCategories.collectAsStateWithLifecycle()
+    val incomeCategories by viewModel.allIncomeCategories.collectAsStateWithLifecycle()
+
     // تراکنش‌ها و فیلترهای تاریخ شمسی
     val filteredTransactions by viewModel.filteredTransactions.collectAsStateWithLifecycle()
     val transactionSearchQuery by viewModel.transactionSearchQuery.collectAsStateWithLifecycle()
@@ -159,6 +163,8 @@ fun TreasuryScreen(
     val selectedTypeFilter by viewModel.selectedTypeFilter.collectAsStateWithLifecycle()
 
     var showAddChequeDialog by remember { mutableStateOf(false) }
+    var clearingCheque by remember { mutableStateOf<ChequeEntity?>(null) }
+    var bouncingCheque by remember { mutableStateOf<ChequeEntity?>(null) }
     var showAddCashDeskDialog by remember { mutableStateOf(false) }
     var showAddBankDialog by remember { mutableStateOf(false) }
     var editingCashDesk by remember { mutableStateOf<CashDeskEntity?>(null) }
@@ -383,6 +389,8 @@ fun TreasuryScreen(
                         2 -> ChequesContent(
                             cheques = cheques,
                             onUpdateStatus = { cheque, status -> viewModel.updateChequeStatus(cheque, status) },
+                            onClearCheque = { cheque -> clearingCheque = cheque },
+                            onBounceCheque = { cheque -> bouncingCheque = cheque },
                             onDeleteCheque = { cheque -> viewModel.deleteCheque(cheque) },
                             onAddCheque = { showAddChequeDialog = true }
                         )
@@ -403,11 +411,53 @@ fun TreasuryScreen(
 
         // دیالوگ‌های عملیاتی خزانه‌داری
         if (showAddChequeDialog) {
-            AddChequeDialog(
+            com.example.ui.components.EnhancedAddChequeDialog(
+                parties = parties,
                 onDismiss = { showAddChequeDialog = false },
-                onConfirm = { number, sayad, type, party, bank, branch, amount, issue, due, notes ->
-                    viewModel.addCheque(number, sayad, type, party, bank, branch, amount, issue, due, notes) {
+                onQuickAddParty = { newParty, onCreated ->
+                    viewModel.quickAddParty(newParty, onCreated)
+                },
+                onConfirm = { number, sayad, type, partyId, partyName, bank, branch, amount, issue, due, notes ->
+                    viewModel.registerChequeWithAccounting(
+                        chequeNumber = number,
+                        sayadNumber = sayad,
+                        type = type,
+                        partyId = partyId,
+                        partyName = partyName,
+                        bankName = bank,
+                        branch = branch,
+                        amount = amount,
+                        issueDate = issue,
+                        dueDate = due,
+                        notes = notes
+                    ) {
                         showAddChequeDialog = false
+                    }
+                }
+            )
+        }
+
+        clearingCheque?.let { ch ->
+            com.example.ui.components.ChequeClearDialog(
+                cheque = ch,
+                bankAccounts = bankAccounts,
+                cashDesks = cashDesks,
+                onDismiss = { clearingCheque = null },
+                onConfirm = { accType, accId ->
+                    viewModel.clearChequeWithAccounting(ch, accType, accId) {
+                        clearingCheque = null
+                    }
+                }
+            )
+        }
+
+        bouncingCheque?.let { ch ->
+            com.example.ui.components.ChequeBounceDialog(
+                cheque = ch,
+                onDismiss = { bouncingCheque = null },
+                onConfirm = {
+                    viewModel.bounceChequeWithAccounting(ch) {
+                        bouncingCheque = null
                     }
                 }
             )
@@ -473,15 +523,33 @@ fun TreasuryScreen(
         }
 
         if (showIncomeDialog) {
-            TreasuryActionDialog(
-                title = "ثبت دریافت وجه / درآمد جدید",
-                actionLabel = "ثبت دریافت و واریز وجه",
+            com.example.ui.components.EnhancedReceiptDialog(
                 cashDesks = cashDesks,
                 bankAccounts = bankAccounts,
-                categories = listOf("فروش خدمات و متفرقه", "سود سپرده بانکی", "تسویه دستی مشتری", "سایر درآمدهای عملیاتی"),
+                parties = parties,
+                incomeCategories = incomeCategories,
                 onDismiss = { showIncomeDialog = false },
-                onConfirm = { title, amount, destType, targetId, category, notes ->
-                    viewModel.registerIncome(title, amount, destType, targetId, category, notes) {
+                onQuickAddParty = { newParty, onCreated ->
+                    viewModel.quickAddParty(newParty, onCreated)
+                },
+                onQuickAddIncomeCategory = { title, onCreated ->
+                    viewModel.quickAddIncomeCategory(title, onSuccess = onCreated)
+                },
+                onConfirm = { isParty, partyId, partyName, catId, catTitle, title, amount, destType, targetId, date, tracking, notes ->
+                    viewModel.registerCashReceipt(
+                        isPartyReceipt = isParty,
+                        partyId = partyId,
+                        partyName = partyName,
+                        incomeCategoryId = catId,
+                        incomeCategoryTitle = catTitle,
+                        title = title,
+                        amount = amount,
+                        destinationType = destType,
+                        targetId = targetId,
+                        jalaliDate = date,
+                        trackingNumber = tracking,
+                        notes = notes
+                    ) {
                         showIncomeDialog = false
                     }
                 }
@@ -489,15 +557,33 @@ fun TreasuryScreen(
         }
 
         if (showExpenseDialog) {
-            TreasuryActionDialog(
-                title = "ثبت پرداخت هزینه جدید",
-                actionLabel = "پرداخت هزینه و خروج وجه",
+            com.example.ui.components.EnhancedPaymentDialog(
                 cashDesks = cashDesks,
                 bankAccounts = bankAccounts,
-                categories = listOf("حقوق و دستمزد پرسنل", "کرایه و حمل کالا", "ملزومات و قبوض اداری", "بسته‌بندی و تبلیغات", "تعمیرات و نگهداری"),
+                parties = parties,
+                expenseCategories = expenseCategories,
                 onDismiss = { showExpenseDialog = false },
-                onConfirm = { title, amount, srcType, sourceId, category, notes ->
-                    viewModel.registerExpense(title, amount, srcType, sourceId, category, notes) {
+                onQuickAddParty = { newParty, onCreated ->
+                    viewModel.quickAddParty(newParty, onCreated)
+                },
+                onQuickAddExpenseCategory = { title, desc, onCreated ->
+                    viewModel.quickAddExpenseCategory(title, desc, onSuccess = onCreated)
+                },
+                onConfirm = { isParty, partyId, partyName, catId, catTitle, title, amount, srcType, sourceId, date, tracking, notes ->
+                    viewModel.registerCashPayment(
+                        isPartyPayment = isParty,
+                        partyId = partyId,
+                        partyName = partyName,
+                        expenseCategoryId = catId,
+                        expenseCategoryTitle = catTitle,
+                        title = title,
+                        amount = amount,
+                        sourceType = srcType,
+                        sourceId = sourceId,
+                        jalaliDate = date,
+                        trackingNumber = tracking,
+                        notes = notes
+                    ) {
                         showExpenseDialog = false
                     }
                 }
@@ -1652,6 +1738,8 @@ private fun CashDeskCardItem(
 private fun ChequesContent(
     cheques: List<ChequeEntity>,
     onUpdateStatus: (ChequeEntity, String) -> Unit,
+    onClearCheque: ((ChequeEntity) -> Unit)? = null,
+    onBounceCheque: ((ChequeEntity) -> Unit)? = null,
     onDeleteCheque: (ChequeEntity) -> Unit = {},
     onAddCheque: () -> Unit
 ) {
@@ -1823,15 +1911,23 @@ private fun ChequesContent(
                                     DropdownMenuItem(
                                         text = { Text("وصول شد (پاس شد)") },
                                         onClick = {
-                                            onUpdateStatus(cheque, "PASSED")
                                             menuExpanded = false
+                                            if (onClearCheque != null) {
+                                                onClearCheque(cheque)
+                                            } else {
+                                                onUpdateStatus(cheque, "PASSED")
+                                            }
                                         }
                                     )
                                     DropdownMenuItem(
                                         text = { Text("برگشت خورد") },
                                         onClick = {
-                                            onUpdateStatus(cheque, "BOUNCED")
                                             menuExpanded = false
+                                            if (onBounceCheque != null) {
+                                                onBounceCheque(cheque)
+                                            } else {
+                                                onUpdateStatus(cheque, "BOUNCED")
+                                            }
                                         }
                                     )
                                     DropdownMenuItem(

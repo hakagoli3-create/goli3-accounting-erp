@@ -173,6 +173,12 @@ class ExpenseAndIncomeRepository(
         expenseAndIncomeDao.deleteExpense(expense)
     }
 
+    suspend fun insertDirectExpense(expense: ExpenseEntity): Long =
+        expenseAndIncomeDao.insertExpense(expense)
+
+    suspend fun insertDirectIncome(income: IncomeEntity): Long =
+        expenseAndIncomeDao.insertIncome(income)
+
     // --- Income Categories ---
     val allIncomeCategories: Flow<List<IncomeCategoryEntity>> =
         expenseAndIncomeDao.getAllIncomeCategories()

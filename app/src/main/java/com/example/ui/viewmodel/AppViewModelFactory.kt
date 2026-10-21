@@ -89,7 +89,8 @@ class AppViewModelFactory(
                 TreasuryViewModel(
                     repository = treasuryRepository,
                     accountingRepo = accountingRepository,
-                    expenseRepo = expenseAndIncomeRepository
+                    expenseRepo = expenseAndIncomeRepository,
+                    partyRepo = partyRepository
                 ) as T
             }
             modelClass.isAssignableFrom(PartyViewModel::class.java) -> {
