@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -82,6 +83,8 @@ fun InvoiceSettlementDialog(
     initialChequeAmount: Long = 0L,
     initialCreditAmount: Long = 0L,
     initialNotes: String = "",
+    isSubmitting: Boolean = false,
+    isEditing: Boolean = false,
     onDismiss: () -> Unit,
     onConfirmSettlement: (
         paymentType: String,
@@ -163,10 +166,10 @@ fun InvoiceSettlementDialog(
         }
     }
 
-    val cashVal = cashInput.toLongOrNull() ?: 0L
-    val posVal = posInput.toLongOrNull() ?: 0L
-    val chequeVal = chequeInput.toLongOrNull() ?: 0L
-    val creditVal = creditInput.toLongOrNull() ?: 0L
+    val cashVal = NumberFormatUtils.parseLongSafe(cashInput, 0L)
+    val posVal = NumberFormatUtils.parseLongSafe(posInput, 0L)
+    val chequeVal = NumberFormatUtils.parseLongSafe(chequeInput, 0L)
+    val creditVal = NumberFormatUtils.parseLongSafe(creditInput, 0L)
     val totalPaid = cashVal + posVal + chequeVal + creditVal
     val remainingBalance = totalAmount - totalPaid
 
@@ -188,11 +191,20 @@ fun InvoiceSettlementDialog(
                     .verticalScroll(rememberScrollState())
             ) {
                 // Header
-                val settlementTitle = when (invoiceType) {
-                    "PURCHASE" -> "تسویه و پرداخت فاکتور خرید"
-                    "RETURN_SALE" -> "استرداد وجه و تسویه مرجوعی فروش"
-                    "RETURN_PURCHASE" -> "دریافت وجه و تسویه مرجوعی خرید"
-                    else -> "تسویه و دریافت وجه فاکتور فروش"
+                val settlementTitle = if (isEditing) {
+                    when (invoiceType) {
+                        "PURCHASE" -> "ویرایش تسویه فاکتور خرید"
+                        "RETURN_SALE" -> "ویرایش تسویه مرجوعی فروش"
+                        "RETURN_PURCHASE" -> "ویرایش تسویه مرجوعی خرید"
+                        else -> "ویرایش تسویه فاکتور فروش"
+                    }
+                } else {
+                    when (invoiceType) {
+                        "PURCHASE" -> "تسویه و پرداخت فاکتور خرید"
+                        "RETURN_SALE" -> "استرداد وجه و تسویه مرجوعی فروش"
+                        "RETURN_PURCHASE" -> "دریافت وجه و تسویه مرجوعی خرید"
+                        else -> "تسویه و دریافت وجه فاکتور فروش"
+                    }
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -570,13 +582,24 @@ fun InvoiceSettlementDialog(
                             notes
                         )
                     },
+                    enabled = !isSubmitting,
                     modifier = Modifier.fillMaxWidth().testTag("confirm_settlement_button"),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
-                    Icon(imageVector = Icons.Default.Payments, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("ثبت نهایی و صدور فاکتور")
+                    if (isSubmitting) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(if (isEditing) "در حال ذخیره تغییرات..." else "در حال ثبت نهایی...")
+                    } else {
+                        Icon(imageVector = Icons.Default.Payments, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(if (isEditing) "ذخیره تغییرات فاکتور" else "ثبت نهایی و صدور فاکتور")
+                    }
                 }
             }
         }

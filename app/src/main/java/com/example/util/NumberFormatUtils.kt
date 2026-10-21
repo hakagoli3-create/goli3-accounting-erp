@@ -48,6 +48,44 @@ object NumberFormatUtils {
             .replace('٩', '9')
     }
 
+    /**
+     * تبدیل ایمن رشته‌های حاوی ارقام فارسی، کاما، ممیز و فاصله به عدد صحیح Long
+     */
+    fun parseLongSafe(text: String, default: Long = 0L): Long {
+        if (text.isBlank()) return default
+        return try {
+            val cleaned = toEnglishDigits(text)
+                .replace(",", "")
+                .replace("٬", "")
+                .replace("،", "")
+                .replace(" ", "")
+                .trim()
+            cleaned.toLongOrNull() ?: default
+        } catch (e: Exception) {
+            default
+        }
+    }
+
+    /**
+     * تبدیل ایمن رشته‌های حاوی ارقام فارسی، کاما، ممیز و فاصله به عدد اعشاری Double
+     */
+    fun parseDoubleSafe(text: String, default: Double = 0.0): Double {
+        if (text.isBlank()) return default
+        return try {
+            val cleaned = toEnglishDigits(text)
+                .replace(",", "")
+                .replace("٬", "")
+                .replace("،", "")
+                .replace("/", ".")
+                .replace("٫", ".")
+                .replace(" ", "")
+                .trim()
+            cleaned.toDoubleOrNull() ?: default
+        } catch (e: Exception) {
+            default
+        }
+    }
+
     fun formatPrice(amount: Long, isToman: Boolean = true): String {
         val symbols = DecimalFormatSymbols(Locale.US).apply {
             groupingSeparator = ','
@@ -183,4 +221,29 @@ object NumberFormatUtils {
     }
 
     private fun teinsText(n: Int): String = teens[n - 10]
+
+    /**
+     * استخراج عدد صحیح (Long) از متن ورودی حتی در صورت داشتن ارقام فارسی، عربی، کاما یا فاصله
+     */
+    fun parseCleanLong(text: String): Long {
+        val clean = toEnglishDigits(text)
+            .replace(",", "")
+            .replace("،", "")
+            .replace(" ", "")
+            .trim()
+        return clean.toLongOrNull() ?: 0L
+    }
+
+    /**
+     * استخراج عدد اعشاری (Double) از متن ورودی جهت مقادیر تعداد، وزن و مقیاس‌های کسری
+     */
+    fun parseCleanDouble(text: String): Double {
+        val clean = toEnglishDigits(text)
+            .replace(",", "")
+            .replace("،", "")
+            .replace(" ", "")
+            .replace("/", ".")
+            .trim()
+        return clean.toDoubleOrNull() ?: 0.0
+    }
 }

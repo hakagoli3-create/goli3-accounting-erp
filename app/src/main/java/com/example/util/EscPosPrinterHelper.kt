@@ -124,7 +124,13 @@ object EscPosPrinterHelper {
 
         stream.write(CMD_ALIGN_CENTER)
         stream.write(makeDivider(printerWidthChars).toByteArray(Charset.forName("UTF-8")))
-        stream.write("با تشکر از خرید و اعتماد شما\n".toByteArray(Charset.forName("UTF-8")))
+        val footerGreeting = when (invoice.invoiceType) {
+            "PURCHASE" -> "تأییدیه تحویل و ثبت فاکتور خرید در سیستم انبار\n"
+            "RETURN_SALE" -> "رسید استرداد وجه و مرجوعی کالا به انبار\n"
+            "RETURN_PURCHASE" -> "رسید مرجوعی کالا به تأمین‌کننده\n"
+            else -> "با تشکر از خرید و اعتماد شما\n"
+        }
+        stream.write(footerGreeting.toByteArray(Charset.forName("UTF-8")))
         stream.write("نرم‌افزار جامع حسابداری گلی\n\n\n".toByteArray(Charset.forName("UTF-8")))
 
         stream.write(CMD_CUT_PAPER)
@@ -193,7 +199,13 @@ object EscPosPrinterHelper {
             sb.appendLine("توضیحات      : ${invoice.note}")
         }
         sb.appendLine("==========================================")
-        sb.appendLine("        از حسن انتخاب شما سپاسگزاریم       ")
+        val footerText = when (invoice.invoiceType) {
+            "PURCHASE" -> "  تأییدیه ثبت فاکتور خرید در انبار و حسابداری  "
+            "RETURN_SALE" -> "       رسید استرداد و مرجوعی کالای فروش        "
+            "RETURN_PURCHASE" -> "      رسید برگشت کالا به تأمین‌کننده           "
+            else -> "        از حسن انتخاب شما سپاسگزاریم       "
+        }
+        sb.appendLine(footerText)
         sb.appendLine("      نرم‌افزار یکپارچه حسابداری گلی       ")
         return sb.toString()
     }

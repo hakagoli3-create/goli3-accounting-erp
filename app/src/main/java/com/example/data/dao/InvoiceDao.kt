@@ -45,6 +45,9 @@ interface InvoiceDao {
     @Query("SELECT * FROM invoices WHERE id = :id LIMIT 1")
     suspend fun getInvoiceById(id: Long): InvoiceEntity?
 
+    @Query("SELECT * FROM invoices WHERE invoiceNumber = :number LIMIT 1")
+    suspend fun getInvoiceByNumber(number: String): InvoiceEntity?
+
     @Query("SELECT * FROM invoice_items WHERE invoiceId = :invoiceId")
     suspend fun getItemsForInvoice(invoiceId: Long): List<InvoiceItemEntity>
 

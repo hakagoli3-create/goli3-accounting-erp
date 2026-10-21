@@ -258,7 +258,7 @@ fun QuickAddPartyDialog(
                                 errorMessage = "لطفاً نام طرف‌حساب را وارد نمایید."
                                 return@Button
                             }
-                            val credit = creditLimitText.toLongOrNull() ?: 0L
+                            val credit = NumberFormatUtils.parseLongSafe(creditLimitText, 0L)
                             val newParty = PartyEntity(
                                 code = "P-${System.currentTimeMillis() % 100000}",
                                 name = name.trim(),
@@ -484,10 +484,10 @@ fun QuickAddOrEditProductDialog(
                                 errorMessage = "لطفاً نام کالا را وارد نمایید."
                                 return@Button
                             }
-                            val retPrice = retailPriceText.toLongOrNull() ?: 0L
-                            val whoPrice = wholesalePriceText.toLongOrNull() ?: retPrice
-                            val purPrice = purchasePriceText.toLongOrNull() ?: 0L
-                            val stock = stockText.toDoubleOrNull() ?: 0.0
+                            val retPrice = NumberFormatUtils.parseLongSafe(retailPriceText, 0L)
+                            val whoPrice = if (wholesalePriceText.isNotBlank()) NumberFormatUtils.parseLongSafe(wholesalePriceText, retPrice) else retPrice
+                            val purPrice = NumberFormatUtils.parseLongSafe(purchasePriceText, 0L)
+                            val stock = NumberFormatUtils.parseDoubleSafe(stockText, 0.0)
 
                             val toSave = if (existingProduct != null) {
                                 existingProduct.copy(

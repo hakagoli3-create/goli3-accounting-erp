@@ -825,8 +825,20 @@ class InvoiceRepository(
         }
     }
 
-    suspend fun generateNextInvoiceNumber(): String {
+    suspend fun generateNextInvoiceNumber(invoiceType: String = "SALE"): String {
+        val prefix = when (invoiceType) {
+            "PURCHASE" -> "خرید"
+            "RETURN_SALE" -> "مرجوعی-فروش"
+            "RETURN_PURCHASE" -> "مرجوعی-خرید"
+            else -> "فاکتور"
+        }
         val maxId = invoiceDao.getMaxInvoiceId()
-        return "فاکتور-${1000 + maxId + 1}"
+        var candidateNum = "$prefix-${1000 + maxId + 1}"
+        var counter = 1
+        while (invoiceDao.getInvoiceByNumber(candidateNum) != null) {
+            candidateNum = "$prefix-${1000 + maxId + 1 + counter}"
+            counter++
+        }
+        return candidateNum
     }
 }

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Print
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.TableChart
@@ -182,6 +184,7 @@ fun InvoiceScreen(
     val previewReceipt by viewModel.previewReceiptText.collectAsStateWithLifecycle()
     val selectedInvoiceForDetails by viewModel.selectedInvoiceForDetails.collectAsStateWithLifecycle()
     val alertMessage by viewModel.alertMessage.collectAsStateWithLifecycle()
+    val isSubmitting by viewModel.isSubmitting.collectAsStateWithLifecycle()
 
     val tabs = listOf(
         "فاکتورهای ثبت شده",
@@ -336,6 +339,8 @@ fun InvoiceScreen(
                     onToggleUnit = { idx -> viewModel.toggleCartItemUnit(idx) },
                     onUpdateQuantity = { idx, q -> viewModel.updateCartItemQuantity(idx, q) },
                     onUpdateUnitPrice = { idx, p -> viewModel.updateCartItemUnitPrice(idx, p) },
+                    onUpdateCartItemFull = { idx, q, p, isPrim -> viewModel.updateCartItemFull(idx, q, p, isPrim) },
+                    onRemoveCartItem = { idx -> viewModel.removeCartItem(idx) },
                     onDiscountChange = { viewModel.setDiscount(it) },
                     onToggleTax = { viewModel.toggleTax(it) },
                     onDirectExpenseChange = { amt, type -> viewModel.setDirectExpense(amt, type) },
@@ -377,6 +382,8 @@ fun InvoiceScreen(
             currencySymbol = currencySymbol,
             currencyRateToBase = invoiceCurrencyRate,
             invoiceType = currentInvoiceType,
+            isSubmitting = isSubmitting,
+            isEditing = editingInvoiceId != null,
             initialPaymentType = if (editingInvoiceId != null) editingPaymentType else "CASH",
             initialCashAmount = if (editingInvoiceId != null) editingCashAmount else 0L,
             initialPosAmount = if (editingInvoiceId != null) editingPosAmount else 0L,
@@ -1513,6 +1520,8 @@ private fun InvoiceEditorContent(
     onToggleUnit: (Int) -> Unit,
     onUpdateQuantity: (Int, Double) -> Unit,
     onUpdateUnitPrice: (Int, Long) -> Unit = { _, _ -> },
+    onUpdateCartItemFull: (Int, Double, Long, Boolean) -> Unit = { _, _, _, _ -> },
+    onRemoveCartItem: (Int) -> Unit = {},
     onDiscountChange: (Long) -> Unit,
     onToggleTax: (Boolean) -> Unit,
     onDirectExpenseChange: (Long, String) -> Unit,
@@ -1526,6 +1535,7 @@ private fun InvoiceEditorContent(
     var selectedProductToAdd by remember { mutableStateOf<ProductEntity?>(null) }
     var showQuickAddPartyDialog by remember { mutableStateOf(false) }
     var showQuickAddProductDialog by remember { mutableStateOf(false) }
+    var editingCartItemIndex by remember { mutableStateOf<Int?>(null) }
     var usePrimaryUnit by remember { mutableStateOf(true) } // کارتن vs عدد
     var discountText by remember { mutableStateOf(if (discount > 0) discount.toString() else "") }
     var directExpenseAmtText by remember { mutableStateOf(if (directExpenseAmount > 0) directExpenseAmount.toString() else "") }
@@ -1776,8 +1786,8 @@ private fun InvoiceEditorContent(
                                 value = rateInput,
                                 onValueChange = {
                                     rateInput = it
-                                    val r = it.toDoubleOrNull() ?: 1.0
-                                    onCurrencyChange(selectedCurrencyCode, r)
+                                    val r = NumberFormatUtils.parseDoubleSafe(it, 1.0)
+                                    onCurrencyChange(selectedCurrencyCode, if (r > 0.0) r else 1.0)
                                 },
                                 label = { Text("نرخ تسعیر هر ۱ $selectedCurrencyCode به تومان") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -1850,7 +1860,7 @@ private fun InvoiceEditorContent(
 
                     val partyDisplayText = selectedParty?.let {
                         if (it.code.isNotBlank()) "${it.name} (${it.code})" else it.name
-                    } ?: "انتخاب $partyLabel..."
+                    } ?: if (isPurchase) "تأمین‌کننده نقدی (پیش‌فرض)" else "مشتری نقدی (پیش‌فرض)"
 
                     ExposedDropdownMenuBox(
                         expanded = partyMenuExpanded,
@@ -1871,6 +1881,19 @@ private fun InvoiceEditorContent(
                             expanded = partyMenuExpanded,
                             onDismissRequest = { partyMenuExpanded = false }
                         ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = if (isPurchase) "تأمین‌کننده نقدی (عمومی)" else "مشتری نقدی (عمومی)",
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                },
+                                onClick = {
+                                    onSelectParty(null)
+                                    partyMenuExpanded = false
+                                }
+                            )
                             availableParties.forEach { party ->
                                 DropdownMenuItem(
                                     text = { Text("${party.name} - اعتبار: ${NumberFormatUtils.formatPrice(party.creditLimit)} (مانده: ${NumberFormatUtils.formatPrice(party.currentBalance)})") },
@@ -1946,7 +1969,7 @@ private fun InvoiceEditorContent(
                             value = directExpenseAmtText,
                             onValueChange = {
                                 directExpenseAmtText = it
-                                onDirectExpenseChange(it.toLongOrNull() ?: 0L, directExpenseDescText)
+                                onDirectExpenseChange(NumberFormatUtils.parseLongSafe(it, 0L), directExpenseDescText)
                             },
                             label = { Text("مبلغ هزینه (تومان)") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -1956,7 +1979,7 @@ private fun InvoiceEditorContent(
                             value = directExpenseDescText,
                             onValueChange = {
                                 directExpenseDescText = it
-                                onDirectExpenseChange(directExpenseAmtText.toLongOrNull() ?: 0L, it)
+                                onDirectExpenseChange(NumberFormatUtils.parseLongSafe(directExpenseAmtText, 0L), it)
                             },
                             label = { Text("شرح هزینه مستقیم") },
                             modifier = Modifier.weight(1.5f)
