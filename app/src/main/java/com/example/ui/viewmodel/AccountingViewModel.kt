@@ -21,7 +21,9 @@ import com.example.data.model.InvoiceWithItems
 import com.example.data.model.JournalItemWithVoucher
 import com.example.data.model.OfficialJournalRow
 import com.example.data.model.PartyEntity
+import com.example.data.model.ProductEntity
 import com.example.data.model.SixColumnTrialBalanceRow
+import com.example.data.repository.InventoryRepository
 import com.example.data.repository.InvoiceRepository
 import com.example.data.repository.PartyRepository
 import kotlinx.coroutines.flow.combine
@@ -66,8 +68,12 @@ data class ProfitLossStatement(
 class AccountingViewModel(
     private val repository: AccountingRepository,
     private val partyRepo: PartyRepository,
-    private val invoiceRepo: InvoiceRepository
+    private val invoiceRepo: InvoiceRepository,
+    private val inventoryRepo: InventoryRepository? = null
 ) : ViewModel() {
+
+    val allProducts: StateFlow<List<ProductEntity>> = (inventoryRepo?.allProducts ?: flowOf(emptyList()))
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val allGroups: StateFlow<List<AccountGroupEntity>> = repository.allGroups
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -164,11 +170,15 @@ class AccountingViewModel(
             }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // محاسبه دقیق و چندمرحله‌ای صورت سود و زیان استاندارد حسابداری
-    val profitLoss: StateFlow<ProfitLossStatement> = trialBalance.map { rows ->
-        var grossSales = 0L
-        var salesReturns = 0L
-        var cogs = 0L
+    // محاسبه دقیق و چندمرحله‌ای صورت سود و زیان استاندارد حسابداری با اتصال بهای تمام شده خرید (COGS) و فاکتورها
+    val profitLoss: StateFlow<ProfitLossStatement> = combine(
+        trialBalance,
+        allInvoices,
+        allProducts
+    ) { rows, invoices, products ->
+        var grossSalesFromVouchers = 0L
+        var salesReturnsFromVouchers = 0L
+        var cogsFromVouchers = 0L
         var opExpenses = 0L
         var otherInc = 0L
         var otherExp = 0L
@@ -182,11 +192,11 @@ class AccountingViewModel(
                     if (row.subsidiaryCode == 60102) {
                         // برگشت از فروش و تخفیفات نقدی
                         val ret = row.totalDebit - row.totalCredit
-                        if (ret > 0) salesReturns += ret
+                        if (ret > 0) salesReturnsFromVouchers += ret
                     } else if (row.subsidiaryCode == 60101) {
                         val amount = row.totalCredit - row.totalDebit
                         if (amount > 0) {
-                            grossSales += amount
+                            grossSalesFromVouchers += amount
                             revList.add(row.title to amount)
                         }
                     } else {
@@ -200,7 +210,7 @@ class AccountingViewModel(
                 7 -> {
                     val amount = row.totalDebit - row.totalCredit
                     if (amount > 0) {
-                        cogs += amount
+                        cogsFromVouchers += amount
                         expList.add("بهای تمام شده: ${row.title}" to amount)
                     }
                 }
@@ -214,8 +224,78 @@ class AccountingViewModel(
             }
         }
 
-        val netSales = maxOf(0L, grossSales - salesReturns)
-        val gross = netSales - cogs
+        // محاسبه مستقیم بهای تمام شده کالای فروش رفته (COGS) بر مبنای اقلام فاکتورهای فروش و قیمت خرید (buyPrice) در انبار
+        val productMap = products.associateBy { it.id }
+        val validInvoices = invoices.filter { it.invoice.status != "VOID" && it.invoice.status != "PROFORMA" }
+
+        var invoiceSalesGross = 0L
+        var invoiceSalesReturns = 0L
+        var invoiceCogs = 0L
+
+        for (inv in validInvoices) {
+            val rate = if (inv.invoice.currencyRateToBase > 0) inv.invoice.currencyRateToBase else 1.0
+            fun toBase(amount: Long): Long {
+                if (rate == 1.0 || amount == 0L) return amount
+                return java.math.BigDecimal(amount)
+                    .multiply(java.math.BigDecimal.valueOf(rate))
+                    .setScale(0, java.math.RoundingMode.HALF_UP)
+                    .toLong()
+            }
+
+            when (inv.invoice.invoiceType) {
+                "SALE", "POS_SALE" -> {
+                    val invTotal = if (inv.invoice.totalAmountInBase > 0) inv.invoice.totalAmountInBase else toBase(inv.invoice.totalAmount)
+                    invoiceSalesGross += invTotal
+
+                    for (item in inv.items) {
+                        val p = productMap[item.productId]
+                        // Null Safety: اگر قیمت خرید کالا در انبار ثبت نشده بود، مقدار پیش‌فرض صفر لحاظ می‌شود
+                        val buyPrice = p?.buyPrice ?: 0L
+                        if (buyPrice > 0L) {
+                            val lineCost = (item.quantityInSecondary * buyPrice).toLong()
+                            invoiceCogs += toBase(lineCost)
+                        }
+                    }
+                }
+                "RETURN_SALE" -> {
+                    val invTotal = if (inv.invoice.totalAmountInBase > 0) inv.invoice.totalAmountInBase else toBase(inv.invoice.totalAmount)
+                    invoiceSalesReturns += invTotal
+
+                    for (item in inv.items) {
+                        val p = productMap[item.productId]
+                        val buyPrice = p?.buyPrice ?: 0L
+                        if (buyPrice > 0L) {
+                            val lineCost = (item.quantityInSecondary * buyPrice).toLong()
+                            invoiceCogs -= toBase(lineCost)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (invoiceCogs < 0L) invoiceCogs = 0L
+
+        // تلفیق جامع اسناد حسابداری و فاکتورهای قطعی:
+        val totalRevenue = if (grossSalesFromVouchers > 0) grossSalesFromVouchers else invoiceSalesGross
+        val salesReturns = if (salesReturnsFromVouchers > 0) salesReturnsFromVouchers else invoiceSalesReturns
+
+        if (revList.isEmpty() && totalRevenue > 0L) {
+            revList.add("فروش نقدی و اعتباری کالا" to totalRevenue)
+        }
+
+        // بهای تمام شده نهایی: در صورت وجود سند معین ۷۰۱۰۱ از آن استفاده می‌شود؛ در غیر این‌صورت از فاکتور+انبار
+        val finalCogs = when {
+            cogsFromVouchers > 0L && invoiceCogs > 0L -> maxOf(cogsFromVouchers, invoiceCogs)
+            cogsFromVouchers > 0L -> cogsFromVouchers
+            else -> invoiceCogs
+        }
+
+        if (finalCogs > 0L && expList.none { it.first.contains("بهای تمام شده") }) {
+            expList.add(0, "بهای تمام شده کالای فروش‌رفته (COGS)" to finalCogs)
+        }
+
+        val netSales = maxOf(0L, totalRevenue - salesReturns)
+        val gross = netSales - finalCogs
         val operating = gross - opExpenses
         val net = operating + otherInc - otherExp
 
@@ -224,10 +304,10 @@ class AccountingViewModel(
         val expToRev = if (netSales > 0) (opExpenses.toDouble() / netSales.toDouble()) * 100.0 else 0.0
 
         ProfitLossStatement(
-            totalRevenue = grossSales,
+            totalRevenue = totalRevenue,
             salesReturnsAndDiscounts = salesReturns,
             netSalesRevenue = netSales,
-            costOfGoodsSold = cogs,
+            costOfGoodsSold = finalCogs,
             grossProfit = gross,
             operatingExpenses = opExpenses,
             operatingProfit = operating,
@@ -958,9 +1038,9 @@ class AccountingViewModel(
         val headers = listOf("ردیف", "عنوان قلم صورت مالی", "مبلغ (تومان)")
         val rows = listOf(
             listOf("۱", "درآمدهای عملیاتی و حاصل از فروش", NumberFormatUtils.formatPrice(pl.totalRevenue)),
-            listOf("۲", "بهای تمام شده کالای فروش رفته (COGS)", "(${NumberFormatUtils.formatPrice(pl.costOfGoodsSold)})"),
+            listOf("۲", "بهای تمام شده کالای فروش رفته", if (pl.costOfGoodsSold > 0) "- ${NumberFormatUtils.formatPrice(pl.costOfGoodsSold)}" else NumberFormatUtils.formatPrice(0L)),
             listOf("۳", "سود (زیان) ناخالص", NumberFormatUtils.formatPrice(pl.grossProfit)),
-            listOf("۴", "هزینه‌های عمومی، اداری و توزیع", "(${NumberFormatUtils.formatPrice(pl.operatingExpenses)})"),
+            listOf("۴", "هزینه‌های عمومی، اداری و توزیع", if (pl.operatingExpenses > 0) "- ${NumberFormatUtils.formatPrice(pl.operatingExpenses)}" else NumberFormatUtils.formatPrice(0L)),
             listOf("۵", "سود (زیان) خالص نهایی دوره", NumberFormatUtils.formatPrice(pl.netProfit))
         )
         val file = ExportHelper.exportReportPdf(context, "صورت سود و زیان رسمی دوره مالی", headers, rows)

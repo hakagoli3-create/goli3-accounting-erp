@@ -333,6 +333,31 @@ class InvoiceRepository(
                         description = "درآمد حاصل از فروش کالا - فاکتور ${invoice.invoiceNumber}$currencyNote", debit = 0L, credit = totalInBase
                     )
                 )
+
+                // ثبت دقیق بهای تمام شده کالای فروش رفته (COGS) و کاهش موجودی کالا بر مبنای قیمت خرید در انبار
+                var cogsInBase = 0L
+                for (item in items) {
+                    val prod = if (item.productId > 0) inventoryDao.getProductById(item.productId) else null
+                    val costPrice = prod?.buyPrice ?: 0L
+                    if (costPrice > 0L) {
+                        val itemCost = (item.quantityInSecondary * costPrice).toLong()
+                        cogsInBase += toBase(itemCost)
+                    }
+                }
+                if (cogsInBase > 0L) {
+                    journalItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 701, subsidiaryCode = 70101, partyId = null,
+                            description = "بهای تمام شده کالای فروش رفته - فاکتور ${invoice.invoiceNumber}$currencyNote", debit = cogsInBase, credit = 0L
+                        )
+                    )
+                    journalItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 103, subsidiaryCode = 10301, partyId = null,
+                            description = "کاهش موجودی کالا بابت بهای تمام شده فاکتور ${invoice.invoiceNumber}$currencyNote", debit = 0L, credit = cogsInBase
+                        )
+                    )
+                }
             }
             "PURCHASE" -> {
                 // بدهکار: خرید کالا و انبار
@@ -414,6 +439,31 @@ class InvoiceRepository(
                         JournalItemEntity(
                             voucherId = 0L, generalCode = 102, subsidiaryCode = 10202, partyId = invoice.partyId,
                             description = "استرداد چک بابت مرجوعی فروش ${invoice.invoiceNumber}", debit = 0L, credit = chequeInBase
+                        )
+                    )
+                }
+
+                // تعدیل بهای تمام شده کالای فروش رفته و بازگشت موجودی انبار برای اقلام مرجوعی
+                var returnCogsInBase = 0L
+                for (item in items) {
+                    val prod = if (item.productId > 0) inventoryDao.getProductById(item.productId) else null
+                    val costPrice = prod?.buyPrice ?: 0L
+                    if (costPrice > 0L) {
+                        val itemCost = (item.quantityInSecondary * costPrice).toLong()
+                        returnCogsInBase += toBase(itemCost)
+                    }
+                }
+                if (returnCogsInBase > 0L) {
+                    journalItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 103, subsidiaryCode = 10301, partyId = null,
+                            description = "ورود به انبار بابت مرجوعی کالا - فاکتور ${invoice.invoiceNumber}$currencyNote", debit = returnCogsInBase, credit = 0L
+                        )
+                    )
+                    journalItems.add(
+                        JournalItemEntity(
+                            voucherId = 0L, generalCode = 701, subsidiaryCode = 70101, partyId = null,
+                            description = "کاهش بهای تمام شده کالای فروش رفته بابت مرجوعی فاکتور ${invoice.invoiceNumber}$currencyNote", debit = 0L, credit = returnCogsInBase
                         )
                     )
                 }
@@ -648,6 +698,31 @@ class InvoiceRepository(
                             description = "برگشت چک دریافتی فاکتور باطل شده ${invoice.invoiceNumber}", debit = 0L, credit = chequeInBase
                         )
                     )
+
+                    // ابطال بهای تمام شده و برگشت موجودی انبار برای فاکتور فروش
+                    var cogsRollbackInBase = 0L
+                    for (item in items) {
+                        val prod = if (item.productId > 0) inventoryDao.getProductById(item.productId) else null
+                        val costPrice = prod?.buyPrice ?: 0L
+                        if (costPrice > 0L) {
+                            val itemCost = (item.quantityInSecondary * costPrice).toLong()
+                            cogsRollbackInBase += toBase(itemCost)
+                        }
+                    }
+                    if (cogsRollbackInBase > 0L) {
+                        rollbackItems.add(
+                            JournalItemEntity(
+                                voucherId = 0L, generalCode = 103, subsidiaryCode = 10301, partyId = null,
+                                description = "برگشت موجودی کالا بابت ابطال فاکتور فروش ${invoice.invoiceNumber}", debit = cogsRollbackInBase, credit = 0L
+                            )
+                        )
+                        rollbackItems.add(
+                            JournalItemEntity(
+                                voucherId = 0L, generalCode = 701, subsidiaryCode = 70101, partyId = null,
+                                description = "ابطال بهای تمام شده کالای فروش رفته - فاکتور ${invoice.invoiceNumber}", debit = 0L, credit = cogsRollbackInBase
+                            )
+                        )
+                    }
                 }
                 "PURCHASE" -> {
                     if (cashInBase > 0) rollbackItems.add(
@@ -712,6 +787,31 @@ class InvoiceRepository(
                             description = "ابطال مرجوعی فروش ${invoice.invoiceNumber}", debit = 0L, credit = totalInBase
                         )
                     )
+
+                    // ابطال کاهش بهای تمام شده مرجوعی
+                    var returnCogsRollbackInBase = 0L
+                    for (item in items) {
+                        val prod = if (item.productId > 0) inventoryDao.getProductById(item.productId) else null
+                        val costPrice = prod?.buyPrice ?: 0L
+                        if (costPrice > 0L) {
+                            val itemCost = (item.quantityInSecondary * costPrice).toLong()
+                            returnCogsRollbackInBase += toBase(itemCost)
+                        }
+                    }
+                    if (returnCogsRollbackInBase > 0L) {
+                        rollbackItems.add(
+                            JournalItemEntity(
+                                voucherId = 0L, generalCode = 701, subsidiaryCode = 70101, partyId = null,
+                                description = "برگشت بهای تمام شده بابت ابطال مرجوعی فروش ${invoice.invoiceNumber}", debit = returnCogsRollbackInBase, credit = 0L
+                            )
+                        )
+                        rollbackItems.add(
+                            JournalItemEntity(
+                                voucherId = 0L, generalCode = 103, subsidiaryCode = 10301, partyId = null,
+                                description = "خروج از موجودی کالا بابت ابطال مرجوعی فروش ${invoice.invoiceNumber}", debit = 0L, credit = returnCogsRollbackInBase
+                            )
+                        )
+                    }
                 }
                 "RETURN_PURCHASE" -> {
                     rollbackItems.add(

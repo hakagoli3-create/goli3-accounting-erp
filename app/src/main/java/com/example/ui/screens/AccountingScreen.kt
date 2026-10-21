@@ -1190,7 +1190,7 @@ private fun JournalEntriesContent(
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text("بدهکار:", fontSize = 10.sp, color = TextDarkSecondary)
                                     Text(
-                                        text = if (row.debit > 0) "${NumberFormatUtils.formatPrice(row.debit)} تومان" else "-",
+                                        text = if (row.debit > 0) NumberFormatUtils.formatPrice(row.debit) else "-",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = if (row.debit > 0) AccountingDebitGreen else TextDarkMuted
@@ -1199,7 +1199,7 @@ private fun JournalEntriesContent(
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text("بستانکار:", fontSize = 10.sp, color = TextDarkSecondary)
                                     Text(
-                                        text = if (row.credit > 0) "${NumberFormatUtils.formatPrice(row.credit)} تومان" else "-",
+                                        text = if (row.credit > 0) NumberFormatUtils.formatPrice(row.credit) else "-",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = if (row.credit > 0) AccountingCreditRed else TextDarkMuted
@@ -2017,7 +2017,7 @@ private fun CreateJournalVoucherContent(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 val neededSide = if (totalDebit > totalCredit) "بستانکار" else "بدهکار"
                                 Text(
-                                    "تراز خودکار: درج ${NumberFormatUtils.formatPrice(balanceDifference)} تومان در سمت $neededSide",
+                                    "تراز خودکار: درج ${NumberFormatUtils.formatPrice(balanceDifference)} در سمت $neededSide",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = NavyPrimary
@@ -2214,7 +2214,7 @@ private fun CreateJournalVoucherContent(
                             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                                 if (item.debit > 0) {
                                     Text(
-                                        text = "بدهکار: ${NumberFormatUtils.formatPrice(item.debit)} تومان",
+                                        text = "بدهکار: ${NumberFormatUtils.formatPrice(item.debit)}",
                                         color = AccountingDebitGreen,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp
@@ -2222,7 +2222,7 @@ private fun CreateJournalVoucherContent(
                                 }
                                 if (item.credit > 0) {
                                     Text(
-                                        text = "بستانکار: ${NumberFormatUtils.formatPrice(item.credit)} تومان",
+                                        text = "بستانکار: ${NumberFormatUtils.formatPrice(item.credit)}",
                                         color = AccountingCreditRed,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp
@@ -2293,7 +2293,7 @@ private fun CreateJournalVoucherContent(
                     ) {
                         Text("مجموع بدهکار:", fontSize = 12.sp, color = TextDarkSecondary)
                         Text(
-                            text = "${NumberFormatUtils.formatPrice(totalDebit)} تومان",
+                            text = NumberFormatUtils.formatPrice(totalDebit),
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp,
                             color = AccountingDebitGreen
@@ -2306,7 +2306,7 @@ private fun CreateJournalVoucherContent(
                     ) {
                         Text("مجموع بستانکار:", fontSize = 12.sp, color = TextDarkSecondary)
                         Text(
-                            text = "${NumberFormatUtils.formatPrice(totalCredit)} تومان",
+                            text = NumberFormatUtils.formatPrice(totalCredit),
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp,
                             color = AccountingCreditRed
@@ -2320,7 +2320,7 @@ private fun CreateJournalVoucherContent(
                         ) {
                             Text("اختلاف بدهکار و بستانکار:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AccountingCreditRed)
                             Text(
-                                text = "${NumberFormatUtils.formatPrice(balanceDiff)} تومان",
+                                text = NumberFormatUtils.formatPrice(balanceDiff),
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp,
                                 color = AccountingCreditRed
@@ -3079,12 +3079,16 @@ private fun ProfitLossContent(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
                             Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = AccountingDebitGreen, modifier = Modifier.size(18.dp))
                             Text("فروش ناخالص و درآمدهای عملیاتی:", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextDarkPrimary)
                         }
                         Text(
-                            text = "${NumberFormatUtils.formatPrice(statement.totalRevenue)} تومان",
+                            text = NumberFormatUtils.formatPrice(statement.totalRevenue),
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
                             color = AccountingDebitGreen
@@ -3097,15 +3101,19 @@ private fun ProfitLossContent(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
                             Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = MatteGold, modifier = Modifier.size(18.dp))
                             Text("کسر می‌شود: برگشت از فروش و تخفیفات:", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextDarkPrimary)
                         }
                         Text(
-                            text = "(${NumberFormatUtils.formatPrice(statement.salesReturnsAndDiscounts)}) تومان",
+                            text = if (statement.salesReturnsAndDiscounts > 0) "- ${NumberFormatUtils.formatPrice(statement.salesReturnsAndDiscounts)}" else NumberFormatUtils.formatPrice(0L),
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
-                            color = MatteGold
+                            color = if (statement.salesReturnsAndDiscounts > 0) MatteGold else TextDarkMuted
                         )
                     }
 
@@ -3117,9 +3125,15 @@ private fun ProfitLossContent(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("خالص درآمدهای فروش و عملیاتی:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = NavyPrimary)
                         Text(
-                            text = "${NumberFormatUtils.formatPrice(statement.netSalesRevenue)} تومان",
+                            text = "خالص درآمدهای فروش و عملیاتی:",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = NavyPrimary,
+                            modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp)
+                        )
+                        Text(
+                            text = NumberFormatUtils.formatPrice(statement.netSalesRevenue),
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
                             color = NavyPrimary
@@ -3132,15 +3146,24 @@ private fun ProfitLossContent(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
                             Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = AccountingCreditRed, modifier = Modifier.size(18.dp))
-                            Text("کسر می‌شود: بهای تمام شده کالای فروش رفته (COGS):", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextDarkPrimary)
+                            Text(
+                                text = "کسر می‌شود: بهای تمام شده کالای فروش‌رفته:",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = TextDarkPrimary
+                            )
                         }
                         Text(
-                            text = "(${NumberFormatUtils.formatPrice(statement.costOfGoodsSold)}) تومان",
+                            text = if (statement.costOfGoodsSold > 0) "- ${NumberFormatUtils.formatPrice(statement.costOfGoodsSold)}" else NumberFormatUtils.formatPrice(0L),
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
-                            color = AccountingCreditRed
+                            color = if (statement.costOfGoodsSold > 0) AccountingCreditRed else TextDarkMuted
                         )
                     }
 
@@ -3152,9 +3175,15 @@ private fun ProfitLossContent(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("سود (زیان) ناخالص:", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextDarkPrimary)
                         Text(
-                            text = "${NumberFormatUtils.formatPrice(statement.grossProfit)} تومان",
+                            text = "سود (زیان) ناخالص:",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = TextDarkPrimary,
+                            modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp)
+                        )
+                        Text(
+                            text = NumberFormatUtils.formatPrice(statement.grossProfit),
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp,
                             color = if (statement.grossProfit >= 0) AccountingDebitGreen else AccountingCreditRed
@@ -3167,15 +3196,19 @@ private fun ProfitLossContent(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
                             Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = AccountingCreditRed, modifier = Modifier.size(18.dp))
                             Text("کسر می‌شود: هزینه‌های عمومی، اداری و توزیع:", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextDarkPrimary)
                         }
                         Text(
-                            text = "(${NumberFormatUtils.formatPrice(statement.operatingExpenses)}) تومان",
+                            text = if (statement.operatingExpenses > 0) "- ${NumberFormatUtils.formatPrice(statement.operatingExpenses)}" else NumberFormatUtils.formatPrice(0L),
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
-                            color = AccountingCreditRed
+                            color = if (statement.operatingExpenses > 0) AccountingCreditRed else TextDarkMuted
                         )
                     }
 
@@ -3187,9 +3220,15 @@ private fun ProfitLossContent(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("سود (زیان) عملیاتی دوره:", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextDarkPrimary)
                         Text(
-                            text = "${NumberFormatUtils.formatPrice(statement.operatingProfit)} تومان",
+                            text = "سود (زیان) عملیاتی دوره:",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = TextDarkPrimary,
+                            modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp)
+                        )
+                        Text(
+                            text = NumberFormatUtils.formatPrice(statement.operatingProfit),
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp,
                             color = if (statement.operatingProfit >= 0) AccountingDebitGreen else AccountingCreditRed
@@ -3211,7 +3250,7 @@ private fun ProfitLossContent(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
+                            Column(modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp)) {
                                 Text(
                                     text = "سود (زیان) خالص نهایی دوره:",
                                     fontWeight = FontWeight.Bold,
@@ -3225,7 +3264,7 @@ private fun ProfitLossContent(
                                 )
                             }
                             Text(
-                                text = "${NumberFormatUtils.formatPrice(statement.netProfit)} تومان",
+                                text = NumberFormatUtils.formatPrice(statement.netProfit),
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 17.sp,
                                 color = if (statement.netProfit >= 0) AccountingDebitGreen else AccountingCreditRed
@@ -3293,11 +3332,12 @@ private fun ProfitLossContent(
                                     .fillMaxWidth()
                                     .background(CleanBackground, RoundedCornerShape(6.dp))
                                     .padding(horizontal = 10.dp, vertical = 6.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(item.first, fontSize = 11.sp, color = TextDarkPrimary)
+                                Text(item.first, fontSize = 11.sp, color = TextDarkPrimary, modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp))
                                 Text(
-                                    text = "${NumberFormatUtils.formatPrice(item.second)} تومان",
+                                    text = NumberFormatUtils.formatPrice(item.second),
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = AccountingDebitGreen
@@ -3329,11 +3369,12 @@ private fun ProfitLossContent(
                                     .fillMaxWidth()
                                     .background(CleanBackground, RoundedCornerShape(6.dp))
                                     .padding(horizontal = 10.dp, vertical = 6.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(item.first, fontSize = 11.sp, color = TextDarkPrimary)
+                                Text(item.first, fontSize = 11.sp, color = TextDarkPrimary, modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp))
                                 Text(
-                                    text = "${NumberFormatUtils.formatPrice(item.second)} تومان",
+                                    text = NumberFormatUtils.formatPrice(item.second),
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = AccountingCreditRed
