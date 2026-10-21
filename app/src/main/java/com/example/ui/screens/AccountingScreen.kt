@@ -99,7 +99,9 @@ import com.example.data.model.AppSecurityAndSettingsManager
 import com.example.data.model.GeneralAccountEntity
 import com.example.data.model.GeneralTrialBalanceRow
 import com.example.data.model.JournalEntryEntity
+import com.example.data.model.OfficialJournalRow
 import com.example.data.model.PartyEntity
+import com.example.data.model.SixColumnTrialBalanceRow
 import com.example.data.model.SubsidiaryAccountEntity
 import com.example.data.model.TrialBalanceRow
 import com.example.ui.viewmodel.ProfitLossStatement
@@ -122,8 +124,6 @@ import com.example.ui.theme.TextDarkMuted
 import com.example.ui.theme.TextDarkPrimary
 import com.example.ui.theme.TextDarkSecondary
 import com.example.ui.viewmodel.AccountingViewModel
-import com.example.ui.viewmodel.ProfitLossStatement
-import com.example.ui.viewmodel.VoucherItemDraft
 import com.example.util.ExportHelper
 import com.example.util.NumberFormatUtils
 
@@ -159,6 +159,10 @@ fun AccountingScreen(
     val trialBalance by viewModel.trialBalance.collectAsStateWithLifecycle()
     val generalTrialBalance by viewModel.generalTrialBalance.collectAsStateWithLifecycle()
     val profitLoss by viewModel.profitLoss.collectAsStateWithLifecycle()
+
+    val officialJournalRows by viewModel.officialJournalRows.collectAsStateWithLifecycle()
+    val sixColumnTrialBalance by viewModel.sixColumnTrialBalance.collectAsStateWithLifecycle()
+    val draftVoucherType by viewModel.draftVoucherType.collectAsStateWithLifecycle()
 
     val draftDesc by viewModel.draftVoucherDescription.collectAsStateWithLifecycle()
     val draftDate by viewModel.draftVoucherDate.collectAsStateWithLifecycle()
@@ -247,6 +251,7 @@ fun AccountingScreen(
                     )
                     1 -> JournalEntriesContent(
                         entries = journalEntries,
+                        officialJournalRows = officialJournalRows,
                         onExportPdf = {
                             val headers = listOf("شماره سند", "تاریخ سند", "شرح سند", "وضعیت")
                             val rows = journalEntries.map {
@@ -263,8 +268,13 @@ fun AccountingScreen(
                             val f = ExportHelper.exportReportCsv(context, "فهرست اسناد روزنامه", headers, rows)
                             if (f != null) ExportHelper.shareFile(context, f, "text/csv", "خروجی اکسل اسناد")
                         },
+                        onExportOfficialJournalPdf = { viewModel.exportOfficialJournalPdf(context) },
+                        onExportOfficialJournalCsv = { viewModel.exportOfficialJournalCsv(context) },
                         onVoidVoucher = { entry ->
                             viewModel.voidVoucher(entry) {}
+                        },
+                        onApproveVoucher = { entry ->
+                            viewModel.approveVoucher(entry) {}
                         },
                         onUpdateVoucher = { entry, desc, date ->
                             viewModel.updateVoucher(entry, desc, date) {}
@@ -368,9 +378,13 @@ fun AccountingScreen(
                         parties = parties,
                         draftDesc = draftDesc,
                         draftDate = draftDate,
+                        draftType = draftVoucherType,
                         draftItems = draftItems,
                         onDescChange = { viewModel.updateDraftDescription(it) },
                         onDateChange = { viewModel.updateDraftDate(it) },
+                        onTypeChange = { viewModel.updateDraftType(it) },
+                        onApplyPreset = { viewModel.applyPreset(it) },
+                        onAutoBalance = { viewModel.autoBalanceDraft(it) },
                         onAddItem = { viewModel.addDraftItem(it) },
                         onRemoveItem = { viewModel.removeDraftItem(it) },
                         onSubmit = {
@@ -382,10 +396,13 @@ fun AccountingScreen(
                     4 -> TrialBalanceContent(
                         trialBalance = trialBalance,
                         generalTrialBalance = generalTrialBalance,
+                        sixColumnTrialBalance = sixColumnTrialBalance,
                         onExportPdf = { viewModel.exportTrialBalancePdf(context) },
                         onExportCsv = { viewModel.exportTrialBalanceCsv(context) },
                         onExportGeneralPdf = { viewModel.exportGeneralTrialBalancePdf(context) },
-                        onExportGeneralCsv = { viewModel.exportGeneralTrialBalanceCsv(context) }
+                        onExportGeneralCsv = { viewModel.exportGeneralTrialBalanceCsv(context) },
+                        onExportSixColumnPdf = { viewModel.exportSixColumnTrialBalancePdf(context) },
+                        onExportSixColumnCsv = { viewModel.exportSixColumnTrialBalanceCsv(context) }
                     )
                     5 -> ProfitLossContent(
                         statement = profitLoss,
@@ -817,15 +834,20 @@ private fun AccountTreeContent(
 @Composable
 private fun JournalEntriesContent(
     entries: List<JournalEntryEntity>,
+    officialJournalRows: List<OfficialJournalRow>,
     onExportPdf: () -> Unit,
     onExportCsv: () -> Unit,
+    onExportOfficialJournalPdf: () -> Unit,
+    onExportOfficialJournalCsv: () -> Unit,
     onVoidVoucher: (JournalEntryEntity) -> Unit,
+    onApproveVoucher: (JournalEntryEntity) -> Unit,
     onUpdateVoucher: (JournalEntryEntity, String, String) -> Unit,
     onDeleteVoucher: (Long) -> Unit,
     onViewDetails: (JournalEntryEntity) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
-    var selectedFilter by remember { mutableStateOf("ALL") } // ALL, BALANCED, UNBALANCED, VOID
+    var selectedFilter by remember { mutableStateOf("ALL") } // ALL, BALANCED, UNBALANCED, VOID, DRAFT, FINAL
+    var viewFormat by remember { mutableStateOf("VOUCHERS") } // VOUCHERS or OFFICIAL_JOURNAL
 
     var editingVoucher by remember { mutableStateOf<JournalEntryEntity?>(null) }
     var voidingVoucher by remember { mutableStateOf<JournalEntryEntity?>(null) }
@@ -842,10 +864,28 @@ private fun JournalEntriesContent(
                 "BALANCED" -> entry.isBalanced && entry.status != "VOID"
                 "UNBALANCED" -> !entry.isBalanced && entry.status != "VOID"
                 "VOID" -> entry.status == "VOID"
+                "DRAFT" -> entry.status == "DRAFT"
+                "FINAL" -> entry.status == "FINAL"
                 else -> true
             }
 
             matchesSearch && matchesFilter
+        }
+    }
+
+    val filteredOfficialRows = remember(officialJournalRows, searchQuery) {
+        if (searchQuery.isBlank()) officialJournalRows
+        else {
+            val q = searchQuery.trim()
+            officialJournalRows.filter { r ->
+                r.voucherNumber.toString().contains(q) ||
+                r.jalaliDate.contains(q) ||
+                r.voucherDescription.contains(q, ignoreCase = true) ||
+                r.accountTitle.contains(q, ignoreCase = true) ||
+                r.accountCode.toString().contains(q) ||
+                (r.partyName?.contains(q, ignoreCase = true) == true) ||
+                r.lineDescription.contains(q, ignoreCase = true)
+            }
         }
     }
 
@@ -856,7 +896,7 @@ private fun JournalEntriesContent(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(bottom = 88.dp)
     ) {
-        // نوار جستجو، فیلترها و دکمه‌های پرینت
+        // نوار جستجو، سوییچ بین اسناد و دفتر روزنامه رسمی، و دکمه‌های پرینت
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -881,14 +921,25 @@ private fun JournalEntriesContent(
                                 Icon(Icons.Default.Receipt, contentDescription = null, tint = NavyPrimary, modifier = Modifier.size(18.dp))
                             }
                             Column {
-                                Text("دفتر روزنامه و اسناد حسابداری", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextDarkPrimary)
-                                Text("مجموع ${NumberFormatUtils.toPersianDigits(entries.size)} سند ثبت شده", fontSize = 11.sp, color = TextDarkSecondary)
+                                Text(
+                                    text = if (viewFormat == "OFFICIAL_JOURNAL") "دفتر روزنامه عمومی (رویدادهای مالی رسمی)" else "دفتر اسناد حسابداری دوبل",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = TextDarkPrimary
+                                )
+                                Text(
+                                    text = if (viewFormat == "OFFICIAL_JOURNAL") "فهرست ترتیبی آرتیکل‌ها با ستون‌های بدهکار و بستانکار" else "مجموع ${NumberFormatUtils.toPersianDigits(entries.size)} سند ثبت شده",
+                                    fontSize = 11.sp,
+                                    color = TextDarkSecondary
+                                )
                             }
                         }
 
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             OutlinedButton(
-                                onClick = onExportPdf,
+                                onClick = {
+                                    if (viewFormat == "OFFICIAL_JOURNAL") onExportOfficialJournalPdf() else onExportPdf()
+                                },
                                 shape = RoundedCornerShape(8.dp),
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                 border = BorderStroke(1.dp, NavyPrimary.copy(alpha = 0.5f))
@@ -898,7 +949,9 @@ private fun JournalEntriesContent(
                                 Text("PDF", fontSize = 11.sp, color = NavyPrimary, fontWeight = FontWeight.Bold)
                             }
                             OutlinedButton(
-                                onClick = onExportCsv,
+                                onClick = {
+                                    if (viewFormat == "OFFICIAL_JOURNAL") onExportOfficialJournalCsv() else onExportCsv()
+                                },
                                 shape = RoundedCornerShape(8.dp),
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                 border = BorderStroke(1.dp, PersianGold)
@@ -910,10 +963,37 @@ private fun JournalEntriesContent(
                         }
                     }
 
+                    // انتخاب فرمت نمایش: اسناد حسابداری یا دفتر روزنامه رسمی
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = viewFormat == "VOUCHERS",
+                            onClick = { viewFormat = "VOUCHERS" },
+                            label = { Text("اسناد حسابداری (کارت‌ها)", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = NavyPrimary,
+                                selectedLabelColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = viewFormat == "OFFICIAL_JOURNAL",
+                            onClick = { viewFormat = "OFFICIAL_JOURNAL" },
+                            label = { Text("دفتر روزنامه ترتیبی (آرتیکل‌ها)", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = PersianGold,
+                                selectedLabelColor = NavyPrimary
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
-                        placeholder = { Text("جستجو در شماره سند، شرح یا تاریخ...", fontSize = 12.sp) },
+                        placeholder = { Text("جستجو در شماره سند، شرح، حساب یا تاریخ...", fontSize = 12.sp) },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TextDarkSecondary, modifier = Modifier.size(18.dp)) },
                         trailingIcon = {
                             if (searchQuery.isNotBlank()) {
@@ -935,253 +1015,413 @@ private fun JournalEntriesContent(
                             .height(50.dp)
                     )
 
-                    // چیپ‌های فیلتر وضعیت اسناد
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        item {
-                            FilterChip(
-                                selected = selectedFilter == "ALL",
-                                onClick = { selectedFilter = "ALL" },
-                                label = { Text("همه اسناد (${NumberFormatUtils.toPersianDigits(entries.size)})", fontSize = 11.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = NavyPrimary,
-                                    selectedLabelColor = Color.White
+                    // چیپ‌های فیلتر وضعیت اسناد (فقط در حالت اسناد)
+                    if (viewFormat == "VOUCHERS") {
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            item {
+                                FilterChip(
+                                    selected = selectedFilter == "ALL",
+                                    onClick = { selectedFilter = "ALL" },
+                                    label = { Text("همه اسناد (${NumberFormatUtils.toPersianDigits(entries.size)})", fontSize = 11.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = NavyPrimary,
+                                        selectedLabelColor = Color.White
+                                    )
                                 )
-                            )
-                        }
-                        item {
-                            val balancedCount = entries.count { it.isBalanced && it.status != "VOID" }
-                            FilterChip(
-                                selected = selectedFilter == "BALANCED",
-                                onClick = { selectedFilter = "BALANCED" },
-                                label = { Text("اسناد تراز (${NumberFormatUtils.toPersianDigits(balancedCount)})", fontSize = 11.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = AccountingDebitGreen,
-                                    selectedLabelColor = Color.White
+                            }
+                            item {
+                                val balancedCount = entries.count { it.isBalanced && it.status != "VOID" }
+                                FilterChip(
+                                    selected = selectedFilter == "BALANCED",
+                                    onClick = { selectedFilter = "BALANCED" },
+                                    label = { Text("تراز (${NumberFormatUtils.toPersianDigits(balancedCount)})", fontSize = 11.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = AccountingDebitGreen,
+                                        selectedLabelColor = Color.White
+                                    )
                                 )
-                            )
-                        }
-                        item {
-                            val unbalancedCount = entries.count { !it.isBalanced && it.status != "VOID" }
-                            FilterChip(
-                                selected = selectedFilter == "UNBALANCED",
-                                onClick = { selectedFilter = "UNBALANCED" },
-                                label = { Text("ناهمخوان (${NumberFormatUtils.toPersianDigits(unbalancedCount)})", fontSize = 11.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = AccountingCreditRed,
-                                    selectedLabelColor = Color.White
+                            }
+                            item {
+                                val unbalancedCount = entries.count { !it.isBalanced && it.status != "VOID" }
+                                FilterChip(
+                                    selected = selectedFilter == "UNBALANCED",
+                                    onClick = { selectedFilter = "UNBALANCED" },
+                                    label = { Text("ناهمخوان (${NumberFormatUtils.toPersianDigits(unbalancedCount)})", fontSize = 11.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = AccountingCreditRed,
+                                        selectedLabelColor = Color.White
+                                    )
                                 )
-                            )
-                        }
-                        item {
-                            val voidCount = entries.count { it.status == "VOID" }
-                            FilterChip(
-                                selected = selectedFilter == "VOID",
-                                onClick = { selectedFilter = "VOID" },
-                                label = { Text("باطل شده (${NumberFormatUtils.toPersianDigits(voidCount)})", fontSize = 11.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = TextDarkMuted,
-                                    selectedLabelColor = Color.White
+                            }
+                            item {
+                                val draftCount = entries.count { it.status == "DRAFT" }
+                                FilterChip(
+                                    selected = selectedFilter == "DRAFT",
+                                    onClick = { selectedFilter = "DRAFT" },
+                                    label = { Text("پیش‌نویس (${NumberFormatUtils.toPersianDigits(draftCount)})", fontSize = 11.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MatteGold,
+                                        selectedLabelColor = Color.White
+                                    )
                                 )
-                            )
+                            }
+                            item {
+                                val finalCount = entries.count { it.status == "FINAL" }
+                                FilterChip(
+                                    selected = selectedFilter == "FINAL",
+                                    onClick = { selectedFilter = "FINAL" },
+                                    label = { Text("قطعی (${NumberFormatUtils.toPersianDigits(finalCount)})", fontSize = 11.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = NavyPrimary,
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                            }
+                            item {
+                                val voidCount = entries.count { it.status == "VOID" }
+                                FilterChip(
+                                    selected = selectedFilter == "VOID",
+                                    onClick = { selectedFilter = "VOID" },
+                                    label = { Text("باطل شده (${NumberFormatUtils.toPersianDigits(voidCount)})", fontSize = 11.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = TextDarkMuted,
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                            }
                         }
                     }
                 }
             }
         }
 
-        if (filteredEntries.isEmpty()) {
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = CleanSurface),
-                    border = BorderStroke(1.dp, CleanBorder)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(32.dp),
-                        contentAlignment = Alignment.Center
+        // اگر حالت دفتر روزنامه رسمی انتخاب شده باشد
+        if (viewFormat == "OFFICIAL_JOURNAL") {
+            if (filteredOfficialRows.isEmpty()) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = CleanSurface),
+                        border = BorderStroke(1.dp, CleanBorder)
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(32.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Receipt, contentDescription = null, tint = TextDarkMuted, modifier = Modifier.size(40.dp))
+                            Text("سطری در دفتر روزنامه ثبت نشده است.", fontSize = 13.sp, color = TextDarkSecondary)
+                        }
+                    }
+                }
+            } else {
+                items(filteredOfficialRows) { row ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = CleanSurface),
+                        border = BorderStroke(1.dp, CleanBorder),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = NavyPrimary.copy(alpha = 0.08f)
+                                    ) {
+                                        Text(
+                                            text = "سند ${NumberFormatUtils.toPersianDigits(row.voucherNumber)} / ردیف ${NumberFormatUtils.toPersianDigits(row.rowNumber)}",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp,
+                                            color = NavyPrimary,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                    Text(
+                                        text = "${NumberFormatUtils.toPersianDigits(row.accountCode)} - ${row.accountTitle}",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = TextDarkPrimary
+                                    )
+                                }
+                                Text(
+                                    text = NumberFormatUtils.toPersianDigits(row.jalaliDate),
+                                    fontSize = 11.sp,
+                                    color = TextDarkSecondary
+                                )
+                            }
+
+                            if (!row.partyName.isNullOrBlank()) {
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = MatteGold.copy(alpha = 0.1f)
+                                ) {
+                                    Text(
+                                        text = "طرف حساب: ${row.partyName}",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = NavyPrimary,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+
                             Text(
-                                text = if (entries.isEmpty()) "هیچ سند حسابداری هنوز ثبت نشده است." else "سندی با مشخصات جستجو شده یافت نشد.",
-                                fontSize = 13.sp,
-                                color = TextDarkSecondary,
-                                fontWeight = FontWeight.Medium
+                                text = row.lineDescription.ifBlank { row.voucherDescription },
+                                fontSize = 11.sp,
+                                color = TextDarkSecondary
                             )
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(CleanBackground, RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text("بدهکار:", fontSize = 10.sp, color = TextDarkSecondary)
+                                    Text(
+                                        text = if (row.debit > 0) "${NumberFormatUtils.formatPrice(row.debit)} تومان" else "-",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (row.debit > 0) AccountingDebitGreen else TextDarkMuted
+                                    )
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text("بستانکار:", fontSize = 10.sp, color = TextDarkSecondary)
+                                    Text(
+                                        text = if (row.credit > 0) "${NumberFormatUtils.formatPrice(row.credit)} تومان" else "-",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (row.credit > 0) AccountingCreditRed else TextDarkMuted
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
         } else {
-            items(filteredEntries) { entry ->
-                val isVoid = entry.status == "VOID"
-
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isVoid) CleanSurface.copy(alpha = 0.7f) else CleanSurface
-                    ),
-                    border = BorderStroke(1.dp, if (isVoid) CleanBorder else if (!entry.isBalanced) AccountingCreditRed.copy(alpha = 0.4f) else CleanBorder),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (isVoid) TextDarkMuted.copy(alpha = 0.15f) else NavyPrimary.copy(alpha = 0.1f)
-                                ) {
-                                    Text(
-                                        text = "سند شماره ${NumberFormatUtils.toPersianDigits(entry.voucherNumber)}",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
-                                        color = if (isVoid) TextDarkMuted else NavyPrimary,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
-                                }
-                            }
-
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = CleanBackground
-                                ) {
-                                    Text(
-                                        text = NumberFormatUtils.toPersianDigits(entry.jalaliDate),
-                                        fontSize = 11.sp,
-                                        color = TextDarkSecondary,
-                                        fontWeight = FontWeight.Medium,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Text(
-                            text = entry.description,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = if (isVoid) TextDarkMuted else TextDarkPrimary
-                        )
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // وضعیت تراز و وضعیت قطعی/باطل
-                        Row(
+            // حالت اسناد حسابداری (کارت‌ها)
+            if (filteredEntries.isEmpty()) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = CleanSurface),
+                        border = BorderStroke(1.dp, CleanBorder)
+                    ) {
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(CleanBackground, RoundedCornerShape(8.dp))
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                                .padding(32.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Icon(
-                                    imageVector = if (entry.isBalanced) Icons.Default.CheckCircle else Icons.Default.Error,
-                                    contentDescription = null,
-                                    tint = if (entry.isBalanced) AccountingDebitGreen else AccountingCreditRed,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = if (entry.isBalanced) "سند تراز دوبل دارد" else "عدم انطباق تراز!",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = if (entry.isBalanced) AccountingDebitGreen else AccountingCreditRed
-                                )
-                            }
-
-                            val (statusLabel, statusColor) = when {
-                                isVoid -> "باطل شده" to AccountingCreditRed
-                                entry.status == "FINAL" -> "ثبت قطعی" to NavyPrimary
-                                else -> "پیش‌نویس" to MatteGold
-                            }
-
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = statusColor.copy(alpha = 0.1f)
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                Icon(Icons.Default.Receipt, contentDescription = null, tint = TextDarkMuted, modifier = Modifier.size(40.dp))
                                 Text(
-                                    text = statusLabel,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = statusColor,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                    text = if (entries.isEmpty()) "هیچ سند حسابداری هنوز ثبت نشده است." else "سندی با مشخصات جستجو شده یافت نشد.",
+                                    fontSize = 13.sp,
+                                    color = TextDarkSecondary,
+                                    fontWeight = FontWeight.Medium
                                 )
                             }
                         }
+                    }
+                }
+            } else {
+                items(filteredEntries) { entry ->
+                    val isVoid = entry.status == "VOID"
+                    val isDraft = entry.status == "DRAFT"
 
-                        HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 10.dp),
-                            color = CleanBorder
-                        )
-
-                        // دکمه‌های عملیاتی: مشاهده آرتیکل‌ها، ویرایش، ابطال و حذف
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Button(
-                                onClick = { onViewDetails(entry) },
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = NavyPrimary, contentColor = Color.White),
-                                modifier = Modifier
-                                    .height(34.dp)
-                                    .testTag("view_voucher_details_${entry.id}")
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isVoid) CleanSurface.copy(alpha = 0.7f) else CleanSurface
+                        ),
+                        border = BorderStroke(1.dp, if (isVoid) CleanBorder else if (!entry.isBalanced) AccountingCreditRed.copy(alpha = 0.4f) else CleanBorder),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.RemoveRedEye, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("مشاهده آرتیکل‌ها و چاپ", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                if (!isVoid) {
-                                    OutlinedButton(
-                                        onClick = { editingVoucher = entry },
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Surface(
                                         shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                        border = BorderStroke(1.dp, NavyPrimary.copy(alpha = 0.4f)),
-                                        modifier = Modifier.height(34.dp)
+                                        color = if (isVoid) TextDarkMuted.copy(alpha = 0.15f) else NavyPrimary.copy(alpha = 0.1f)
                                     ) {
-                                        Icon(Icons.Default.Edit, contentDescription = null, tint = NavyPrimary, modifier = Modifier.size(14.dp))
-                                        Spacer(modifier = Modifier.width(3.dp))
-                                        Text("ویرایش", fontSize = 11.sp, color = NavyPrimary)
-                                    }
-                                    OutlinedButton(
-                                        onClick = { voidingVoucher = entry },
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                        border = BorderStroke(1.dp, AccountingCreditRed.copy(alpha = 0.5f)),
-                                        modifier = Modifier.height(34.dp)
-                                    ) {
-                                        Text("ابطال", fontSize = 11.sp, color = AccountingCreditRed)
+                                        Text(
+                                            text = "سند شماره ${NumberFormatUtils.toPersianDigits(entry.voucherNumber)}",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = if (isVoid) TextDarkMuted else NavyPrimary,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
                                     }
                                 }
 
-                                OutlinedButton(
-                                    onClick = { deletingVoucherId = entry.id },
-                                    shape = RoundedCornerShape(8.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                    border = BorderStroke(1.dp, CleanBorder),
-                                    modifier = Modifier.height(34.dp)
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = CleanBackground
+                                    ) {
+                                        Text(
+                                            text = NumberFormatUtils.toPersianDigits(entry.jalaliDate),
+                                            fontSize = 11.sp,
+                                            color = TextDarkSecondary,
+                                            fontWeight = FontWeight.Medium,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Text(
+                                text = entry.description,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (isVoid) TextDarkMuted else TextDarkPrimary
+                            )
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // وضعیت تراز و وضعیت قطعی/باطل
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(CleanBackground, RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Icon(
+                                        imageVector = if (entry.isBalanced) Icons.Default.CheckCircle else Icons.Default.Error,
+                                        contentDescription = null,
+                                        tint = if (entry.isBalanced) AccountingDebitGreen else AccountingCreditRed,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = if (entry.isBalanced) "سند تراز دوبل دارد" else "عدم انطباق تراز!",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (entry.isBalanced) AccountingDebitGreen else AccountingCreditRed
+                                    )
+                                }
+
+                                val (statusLabel, statusColor) = when {
+                                    isVoid -> "باطل شده" to AccountingCreditRed
+                                    entry.status == "FINAL" -> "ثبت قطعی" to NavyPrimary
+                                    else -> "پیش‌نویس" to MatteGold
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = statusColor.copy(alpha = 0.1f)
                                 ) {
-                                    Icon(Icons.Default.Delete, contentDescription = null, tint = AccountingCreditRed, modifier = Modifier.size(14.dp))
+                                    Text(
+                                        text = statusLabel,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = statusColor,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 10.dp),
+                                color = CleanBorder
+                            )
+
+                            // دکمه‌های عملیاتی: مشاهده آرتیکل‌ها، تایید و قطعی‌سازی، ویرایش، ابطال و حذف
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Button(
+                                        onClick = { onViewDetails(entry) },
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = NavyPrimary, contentColor = Color.White),
+                                        modifier = Modifier
+                                            .height(34.dp)
+                                            .testTag("view_voucher_details_${entry.id}")
+                                    ) {
+                                        Icon(Icons.Default.RemoveRedEye, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("آرتیکل‌ها و چاپ", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+
+                                    if (isDraft && !isVoid && entry.isBalanced) {
+                                        OutlinedButton(
+                                            onClick = { onApproveVoucher(entry) },
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                            border = BorderStroke(1.dp, AccountingDebitGreen),
+                                            colors = ButtonDefaults.outlinedButtonColors(containerColor = AccountingDebitGreen.copy(alpha = 0.08f)),
+                                            modifier = Modifier.height(34.dp)
+                                        ) {
+                                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccountingDebitGreen, modifier = Modifier.size(14.dp))
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text("تأیید و قطعی", fontSize = 11.sp, color = AccountingDebitGreen, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    if (!isVoid) {
+                                        OutlinedButton(
+                                            onClick = { editingVoucher = entry },
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                            border = BorderStroke(1.dp, NavyPrimary.copy(alpha = 0.4f)),
+                                            modifier = Modifier.height(34.dp)
+                                        ) {
+                                            Icon(Icons.Default.Edit, contentDescription = null, tint = NavyPrimary, modifier = Modifier.size(14.dp))
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text("ویرایش", fontSize = 11.sp, color = NavyPrimary)
+                                        }
+                                        OutlinedButton(
+                                            onClick = { voidingVoucher = entry },
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                            border = BorderStroke(1.dp, AccountingCreditRed.copy(alpha = 0.5f)),
+                                            modifier = Modifier.height(34.dp)
+                                        ) {
+                                            Text("ابطال", fontSize = 11.sp, color = AccountingCreditRed)
+                                        }
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = { deletingVoucherId = entry.id },
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                        border = BorderStroke(1.dp, CleanBorder),
+                                        modifier = Modifier.height(34.dp)
+                                    ) {
+                                        Icon(Icons.Default.Delete, contentDescription = null, tint = AccountingCreditRed, modifier = Modifier.size(14.dp))
+                                    }
                                 }
                             }
                         }
@@ -1334,9 +1574,13 @@ private fun CreateJournalVoucherContent(
     parties: List<PartyEntity>,
     draftDesc: String,
     draftDate: String,
+    draftType: String,
     draftItems: List<VoucherItemDraft>,
     onDescChange: (String) -> Unit,
     onDateChange: (String) -> Unit,
+    onTypeChange: (String) -> Unit,
+    onApplyPreset: (String) -> Unit,
+    onAutoBalance: (SubsidiaryAccountEntity) -> Unit,
     onAddItem: (VoucherItemDraft) -> Unit,
     onRemoveItem: (Int) -> Unit,
     onSubmit: () -> Unit
@@ -1381,7 +1625,7 @@ private fun CreateJournalVoucherContent(
         verticalArrangement = Arrangement.spacedBy(14.dp),
         contentPadding = PaddingValues(bottom = 88.dp)
     ) {
-        // الگوهای سریع صدور سند
+        // الگوهای سریع و هوشمند صدور سند مالی
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1392,63 +1636,67 @@ private fun CreateJournalVoucherContent(
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Icon(Icons.Default.FlashOn, contentDescription = null, tint = MatteGold, modifier = Modifier.size(18.dp))
-                        Text("الگوهای سریع صدور سند مالی:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextDarkPrimary)
+                        Text("الگوهای سریع صدور سند دوبل استاندارد:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextDarkPrimary)
                     }
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         item {
                             Surface(
-                                onClick = {
-                                    onDescChange("پرداخت هزینه عمومی و اداری از بانک")
-                                    val expSub = subsidiaries.firstOrNull { it.code.toString().startsWith("80") }
-                                    if (expSub != null) selectedSub = expSub
-                                },
+                                onClick = { onApplyPreset("CASH_TO_BANK") },
                                 shape = RoundedCornerShape(8.dp),
                                 color = CleanBackground,
                                 border = BorderStroke(1.dp, CleanBorder)
                             ) {
-                                Text("هزینه از بانک / صندوق", fontSize = 11.sp, color = NavyPrimary, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+                                Text("واریز صندوق به بانک", fontSize = 11.sp, color = NavyPrimary, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
                             }
                         }
                         item {
                             Surface(
-                                onClick = {
-                                    onDescChange("دریافت وجه از طرف حساب و واریز به بانک")
-                                    val bankSub = subsidiaries.firstOrNull { it.code.toString().startsWith("102") }
-                                    if (bankSub != null) selectedSub = bankSub
-                                },
+                                onClick = { onApplyPreset("BANK_TO_CASH") },
                                 shape = RoundedCornerShape(8.dp),
                                 color = CleanBackground,
                                 border = BorderStroke(1.dp, CleanBorder)
                             ) {
-                                Text("واریز مشتری به بانک", fontSize = 11.sp, color = NavyPrimary, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+                                Text("برداشت بانک به صندوق", fontSize = 11.sp, color = NavyPrimary, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
                             }
                         }
                         item {
                             Surface(
-                                onClick = {
-                                    onDescChange("انتقال نقدینگی بین حساب بانکی و صندوق")
-                                    val cashSub = subsidiaries.firstOrNull { it.code.toString().startsWith("101") }
-                                    if (cashSub != null) selectedSub = cashSub
-                                },
+                                onClick = { onApplyPreset("EXPENSE_CASH") },
                                 shape = RoundedCornerShape(8.dp),
                                 color = CleanBackground,
                                 border = BorderStroke(1.dp, CleanBorder)
                             ) {
-                                Text("انتقال بانک و صندوق", fontSize = 11.sp, color = NavyPrimary, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+                                Text("هزینه نقدی از صندوق", fontSize = 11.sp, color = NavyPrimary, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
                             }
                         }
                         item {
                             Surface(
-                                onClick = {
-                                    onDescChange("سرمایه‌گذاری نقدی و آورده شرکاء")
-                                    val capSub = subsidiaries.firstOrNull { it.code.toString().startsWith("50") }
-                                    if (capSub != null) selectedSub = capSub
-                                },
+                                onClick = { onApplyPreset("PARTY_RECEIVE") },
                                 shape = RoundedCornerShape(8.dp),
                                 color = CleanBackground,
                                 border = BorderStroke(1.dp, CleanBorder)
                             ) {
-                                Text("آورده شرکاء / سرمایه", fontSize = 11.sp, color = NavyPrimary, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+                                Text("دریافت از مشتری / طرف حساب", fontSize = 11.sp, color = NavyPrimary, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+                            }
+                        }
+                        item {
+                            Surface(
+                                onClick = { onApplyPreset("PARTY_PAY") },
+                                shape = RoundedCornerShape(8.dp),
+                                color = CleanBackground,
+                                border = BorderStroke(1.dp, CleanBorder)
+                            ) {
+                                Text("پرداخت به تامین‌کننده", fontSize = 11.sp, color = NavyPrimary, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+                            }
+                        }
+                        item {
+                            Surface(
+                                onClick = { onApplyPreset("CAPITAL_INJECTION") },
+                                shape = RoundedCornerShape(8.dp),
+                                color = CleanBackground,
+                                border = BorderStroke(1.dp, CleanBorder)
+                            ) {
+                                Text("آورده نقدی شرکاء (سرمایه)", fontSize = 11.sp, color = NavyPrimary, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
                             }
                         }
                     }
@@ -1456,7 +1704,7 @@ private fun CreateJournalVoucherContent(
             }
         }
 
-        // ۱. مشخصات عمومی سند
+        // ۱. مشخصات عمومی سند و نوع سند مالی
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1477,11 +1725,39 @@ private fun CreateJournalVoucherContent(
                         }
                         Column {
                             Text("اطلاعات عمومی سند حسابداری", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextDarkPrimary)
-                            Text("شرح کلی و تاریخ صدور سند دوبل مالی", fontSize = 11.sp, color = TextDarkSecondary)
+                            Text("نوع سند، شرح کلی و تاریخ صدور سند دوبل مالی", fontSize = 11.sp, color = TextDarkSecondary)
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // نوع سند حسابداری (عادی، افتتاحیه، اختتامیه، تسویه)
+                    Text("نوع سند حسابداری:", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = TextDarkSecondary)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(
+                            "NORMAL" to "عادی",
+                            "OPENING" to "افتتاحیه",
+                            "CLOSING" to "اختتامیه",
+                            "SETTLEMENT" to "تسویه حساب‌ها"
+                        ).forEach { (typeCode, typeLabel) ->
+                            FilterChip(
+                                selected = draftType == typeCode,
+                                onClick = { onTypeChange(typeCode) },
+                                label = { Text(typeLabel, fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = NavyPrimary,
+                                    selectedLabelColor = Color.White
+                                ),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     OutlinedTextField(
                         value = draftDesc,
@@ -1719,32 +1995,51 @@ private fun CreateJournalVoucherContent(
 
                     // دکمه پیشنهاد تکمیل خودکار مبلغ اختلاف تراز
                     if (draftItems.isNotEmpty() && balanceDifference > 0L) {
-                        OutlinedButton(
-                            onClick = {
-                                if (totalDebit > totalCredit) {
-                                    itemCreditText = balanceDifference.toString()
-                                    itemDebitText = ""
-                                } else {
-                                    itemDebitText = balanceDifference.toString()
-                                    itemCreditText = ""
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    if (totalDebit > totalCredit) {
+                                        itemCreditText = balanceDifference.toString()
+                                        itemDebitText = ""
+                                    } else {
+                                        itemDebitText = balanceDifference.toString()
+                                        itemCreditText = ""
+                                    }
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, MatteGold),
+                                colors = ButtonDefaults.outlinedButtonColors(containerColor = MatteGold.copy(alpha = 0.08f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(38.dp)
+                            ) {
+                                Icon(Icons.Default.Star, contentDescription = null, tint = MatteGold, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                val neededSide = if (totalDebit > totalCredit) "بستانکار" else "بدهکار"
+                                Text(
+                                    "تراز خودکار: درج ${NumberFormatUtils.formatPrice(balanceDifference)} تومان در سمت $neededSide",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NavyPrimary
+                                )
+                            }
+
+                            if (selectedSub != null) {
+                                Button(
+                                    onClick = { onAutoBalance(selectedSub!!) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = AccountingDebitGreen, contentColor = Color.White),
+                                    modifier = Modifier.fillMaxWidth().height(36.dp)
+                                ) {
+                                    Icon(Icons.Default.FlashOn, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        "افزودن مستقیم سطر موازنه‌ساز برای «${selectedSub!!.title}»",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, MatteGold),
-                            colors = ButtonDefaults.outlinedButtonColors(containerColor = MatteGold.copy(alpha = 0.08f)),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(38.dp)
-                        ) {
-                            Icon(Icons.Default.Star, contentDescription = null, tint = MatteGold, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            val neededSide = if (totalDebit > totalCredit) "بستانکار" else "بدهکار"
-                            Text(
-                                "تراز خودکار: درج ${NumberFormatUtils.formatPrice(balanceDifference)} تومان در سمت $neededSide",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = NavyPrimary
-                            )
+                            }
                         }
                         Spacer(modifier = Modifier.height(10.dp))
                     }
@@ -2072,17 +2367,21 @@ private fun CreateJournalVoucherContent(
 private fun TrialBalanceContent(
     trialBalance: List<TrialBalanceRow>,
     generalTrialBalance: List<GeneralTrialBalanceRow>,
+    sixColumnTrialBalance: List<SixColumnTrialBalanceRow>,
     onExportPdf: () -> Unit,
     onExportCsv: () -> Unit,
     onExportGeneralPdf: () -> Unit,
-    onExportGeneralCsv: () -> Unit
+    onExportGeneralCsv: () -> Unit,
+    onExportSixColumnPdf: () -> Unit,
+    onExportSixColumnCsv: () -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var onlyActive by remember { mutableStateOf(false) }
     var levelMode by remember { mutableStateOf("SUBSIDIARY") } // SUBSIDIARY or GENERAL
-    var columnMode by remember { mutableStateOf("FOUR_COL") } // FOUR_COL or TWO_COL
+    var columnMode by remember { mutableStateOf("FOUR_COL") } // TWO_COL, FOUR_COL, SIX_COL
 
-    val isGeneral = levelMode == "GENERAL"
+    val isGeneral = levelMode == "GENERAL" && columnMode != "SIX_COL"
+    val isSixCol = columnMode == "SIX_COL"
 
     val filteredSubRows = remember(trialBalance, searchQuery, onlyActive) {
         trialBalance.filter { row ->
@@ -2106,6 +2405,21 @@ private fun TrialBalanceContent(
         }
     }
 
+    val filteredSixColRows = remember(sixColumnTrialBalance, searchQuery, onlyActive) {
+        sixColumnTrialBalance.filter { row ->
+            val matchesSearch = searchQuery.isBlank() ||
+                row.code.toString().contains(searchQuery) ||
+                row.title.contains(searchQuery, ignoreCase = true) ||
+                row.generalTitle.contains(searchQuery, ignoreCase = true)
+            val matchesActive = !onlyActive || (
+                row.openingDebit > 0 || row.openingCredit > 0 ||
+                row.periodDebit > 0 || row.periodCredit > 0 ||
+                row.finalDebit > 0 || row.finalCredit > 0
+            )
+            matchesSearch && matchesActive
+        }
+    }
+
     val sumTurnoverDebit = remember(trialBalance, generalTrialBalance, isGeneral) {
         if (isGeneral) generalTrialBalance.sumOf { it.totalDebit } else trialBalance.sumOf { it.totalDebit }
     }
@@ -2118,7 +2432,21 @@ private fun TrialBalanceContent(
     val sumBalanceCredit = remember(trialBalance, generalTrialBalance, isGeneral) {
         if (isGeneral) generalTrialBalance.sumOf { it.balanceCredit } else trialBalance.sumOf { it.balanceCredit }
     }
-    val isTrialBalanced = sumBalanceDebit == sumBalanceCredit
+
+    val sixSumOpeningDebit = remember(sixColumnTrialBalance) { sixColumnTrialBalance.sumOf { it.openingDebit } }
+    val sixSumOpeningCredit = remember(sixColumnTrialBalance) { sixColumnTrialBalance.sumOf { it.openingCredit } }
+    val sixSumPeriodDebit = remember(sixColumnTrialBalance) { sixColumnTrialBalance.sumOf { it.periodDebit } }
+    val sixSumPeriodCredit = remember(sixColumnTrialBalance) { sixColumnTrialBalance.sumOf { it.periodCredit } }
+    val sixSumFinalDebit = remember(sixColumnTrialBalance) { sixColumnTrialBalance.sumOf { it.finalDebit } }
+    val sixSumFinalCredit = remember(sixColumnTrialBalance) { sixColumnTrialBalance.sumOf { it.finalCredit } }
+
+    val isTrialBalanced = if (isSixCol) {
+        sixSumOpeningDebit == sixSumOpeningCredit &&
+        sixSumPeriodDebit == sixSumPeriodCredit &&
+        sixSumFinalDebit == sixSumFinalCredit
+    } else {
+        sumBalanceDebit == sumBalanceCredit
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -2153,13 +2481,17 @@ private fun TrialBalanceContent(
                             }
                             Column {
                                 Text(
-                                    text = if (isGeneral) "تراز آزمایشی سطح حساب‌های کل" else "تراز آزمایشی سطح معین",
+                                    text = if (isSixCol) "تراز آزمایشی ۶ ستونی جامع (استاندارد حسابرسی)" else if (isGeneral) "تراز آزمایشی سطح حساب‌های کل" else "تراز آزمایشی سطح معین",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp,
                                     color = TextDarkPrimary
                                 )
                                 Text(
-                                    text = if (columnMode == "FOUR_COL") "تراز ۴ ستونی (گردش و مانده)" else "تراز ۲ ستونی (فقط مانده)",
+                                    text = when (columnMode) {
+                                        "SIX_COL" -> "گردش قبل، گردش طی دوره و مانده نهایی"
+                                        "FOUR_COL" -> "تراز ۴ ستونی (گردش و مانده)"
+                                        else -> "تراز ۲ ستونی (فقط مانده نهایی)"
+                                    },
                                     fontSize = 11.sp,
                                     color = TextDarkSecondary
                                 )
@@ -2168,7 +2500,13 @@ private fun TrialBalanceContent(
 
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             OutlinedButton(
-                                onClick = { if (isGeneral) onExportGeneralPdf() else onExportPdf() },
+                                onClick = {
+                                    when {
+                                        isSixCol -> onExportSixColumnPdf()
+                                        isGeneral -> onExportGeneralPdf()
+                                        else -> onExportPdf()
+                                    }
+                                },
                                 shape = RoundedCornerShape(8.dp),
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                 border = BorderStroke(1.dp, NavyPrimary.copy(alpha = 0.5f))
@@ -2178,7 +2516,13 @@ private fun TrialBalanceContent(
                                 Text("PDF", fontSize = 11.sp, color = NavyPrimary, fontWeight = FontWeight.Bold)
                             }
                             OutlinedButton(
-                                onClick = { if (isGeneral) onExportGeneralCsv() else onExportCsv() },
+                                onClick = {
+                                    when {
+                                        isSixCol -> onExportSixColumnCsv()
+                                        isGeneral -> onExportGeneralCsv()
+                                        else -> onExportCsv()
+                                    }
+                                },
                                 shape = RoundedCornerShape(8.dp),
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                 border = BorderStroke(1.dp, PersianGold)
@@ -2190,36 +2534,54 @@ private fun TrialBalanceContent(
                         }
                     }
 
-                    // انتخاب سطح تراز و نوع ستون‌بندی
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(
-                            selected = levelMode == "SUBSIDIARY",
-                            onClick = { levelMode = "SUBSIDIARY" },
-                            label = { Text("سطح معین", fontSize = 11.sp) },
-                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NavyPrimary, selectedLabelColor = Color.White),
-                            modifier = Modifier.weight(1f)
-                        )
-                        FilterChip(
-                            selected = levelMode == "GENERAL",
-                            onClick = { levelMode = "GENERAL" },
-                            label = { Text("سطح کل", fontSize = 11.sp) },
-                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NavyPrimary, selectedLabelColor = Color.White),
-                            modifier = Modifier.weight(1f)
-                        )
-                        FilterChip(
-                            selected = columnMode == "FOUR_COL",
-                            onClick = { columnMode = "FOUR_COL" },
-                            label = { Text("۴ ستونی", fontSize = 11.sp) },
-                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PersianGold, selectedLabelColor = NavyPrimary),
-                            modifier = Modifier.weight(1f)
-                        )
-                        FilterChip(
-                            selected = columnMode == "TWO_COL",
-                            onClick = { columnMode = "TWO_COL" },
-                            label = { Text("۲ ستونی", fontSize = 11.sp) },
-                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PersianGold, selectedLabelColor = NavyPrimary),
-                            modifier = Modifier.weight(1f)
-                        )
+                    // انتخاب سطح تراز و نوع ستون‌بندی (۲ ستونی، ۴ ستونی، ۶ ستونی)
+                    LazyRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        item {
+                            FilterChip(
+                                selected = levelMode == "SUBSIDIARY" && !isSixCol,
+                                onClick = {
+                                    levelMode = "SUBSIDIARY"
+                                    if (columnMode == "SIX_COL") columnMode = "FOUR_COL"
+                                },
+                                label = { Text("سطح معین", fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NavyPrimary, selectedLabelColor = Color.White)
+                            )
+                        }
+                        item {
+                            FilterChip(
+                                selected = levelMode == "GENERAL" && !isSixCol,
+                                onClick = {
+                                    levelMode = "GENERAL"
+                                    if (columnMode == "SIX_COL") columnMode = "FOUR_COL"
+                                },
+                                label = { Text("سطح کل", fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NavyPrimary, selectedLabelColor = Color.White)
+                            )
+                        }
+                        item {
+                            FilterChip(
+                                selected = columnMode == "SIX_COL",
+                                onClick = { columnMode = "SIX_COL" },
+                                label = { Text("۶ ستونی (جامع)", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MatteGold, selectedLabelColor = NavyPrimary)
+                            )
+                        }
+                        item {
+                            FilterChip(
+                                selected = columnMode == "FOUR_COL",
+                                onClick = { columnMode = "FOUR_COL" },
+                                label = { Text("۴ ستونی", fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PersianGold, selectedLabelColor = NavyPrimary)
+                            )
+                        }
+                        item {
+                            FilterChip(
+                                selected = columnMode == "TWO_COL",
+                                onClick = { columnMode = "TWO_COL" },
+                                label = { Text("۲ ستونی", fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PersianGold, selectedLabelColor = NavyPrimary)
+                            )
+                        }
                     }
 
                     // خلاصه وضعیت انطباق مانده‌ها
@@ -2236,7 +2598,7 @@ private fun TrialBalanceContent(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = if (isTrialBalanced) "تراز سیستم تأیید است (مجموع بدهکار = بستانکار)" else "عدم انطباق در تراز آزمایشی!",
+                                text = if (isTrialBalanced) "تراز سیستم تأیید است (مجموع بدهکار = بستانکار) ✓" else "عدم انطباق در تراز آزمایشی! ✕",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isTrialBalanced) AccountingDebitGreen else AccountingCreditRed
@@ -2250,31 +2612,54 @@ private fun TrialBalanceContent(
                         }
                     }
 
-                    // جدول سرجمع ستون‌ها
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(CleanBackground, RoundedCornerShape(10.dp))
-                            .padding(10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        if (columnMode == "FOUR_COL") {
-                            Column {
-                                Text("گردش بد:", fontSize = 10.sp, color = TextDarkSecondary)
-                                Text(NumberFormatUtils.formatPrice(sumTurnoverDebit), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextDarkPrimary)
+                    // جدول سرجمع ستون‌ها بر اساس حالت ستونی
+                    if (isSixCol) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(CleanBackground, RoundedCornerShape(10.dp))
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("سرجمع گردش افتتاحیه / قبل:", fontSize = 10.sp, color = TextDarkSecondary)
+                                Text("بد: ${NumberFormatUtils.formatPrice(sixSumOpeningDebit)} | بس: ${NumberFormatUtils.formatPrice(sixSumOpeningCredit)} تومان", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextDarkPrimary)
                             }
-                            Column {
-                                Text("گردش بس:", fontSize = 10.sp, color = TextDarkSecondary)
-                                Text(NumberFormatUtils.formatPrice(sumTurnoverCredit), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextDarkPrimary)
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("سرجمع گردش طی دوره:", fontSize = 10.sp, color = TextDarkSecondary)
+                                Text("بد: ${NumberFormatUtils.formatPrice(sixSumPeriodDebit)} | بس: ${NumberFormatUtils.formatPrice(sixSumPeriodCredit)} تومان", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextDarkPrimary)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("سرجمع مانده نهایی پایان دوره:", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = NavyPrimary)
+                                Text("بد: ${NumberFormatUtils.formatPrice(sixSumFinalDebit)} | بس: ${NumberFormatUtils.formatPrice(sixSumFinalCredit)} تومان", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (sixSumFinalDebit == sixSumFinalCredit) AccountingDebitGreen else AccountingCreditRed)
                             }
                         }
-                        Column {
-                            Text("مانده بدهکار:", fontSize = 10.sp, color = TextDarkSecondary)
-                            Text(NumberFormatUtils.formatPrice(sumBalanceDebit), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AccountingDebitGreen)
-                        }
-                        Column {
-                            Text("مانده بستانکار:", fontSize = 10.sp, color = TextDarkSecondary)
-                            Text(NumberFormatUtils.formatPrice(sumBalanceCredit), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AccountingCreditRed)
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(CleanBackground, RoundedCornerShape(10.dp))
+                                .padding(10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            if (columnMode == "FOUR_COL") {
+                                Column {
+                                    Text("گردش بد:", fontSize = 10.sp, color = TextDarkSecondary)
+                                    Text(NumberFormatUtils.formatPrice(sumTurnoverDebit), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextDarkPrimary)
+                                }
+                                Column {
+                                    Text("گردش بس:", fontSize = 10.sp, color = TextDarkSecondary)
+                                    Text(NumberFormatUtils.formatPrice(sumTurnoverCredit), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextDarkPrimary)
+                                }
+                            }
+                            Column {
+                                Text("مانده بدهکار:", fontSize = 10.sp, color = TextDarkSecondary)
+                                Text(NumberFormatUtils.formatPrice(sumBalanceDebit), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AccountingDebitGreen)
+                            }
+                            Column {
+                                Text("مانده بستانکار:", fontSize = 10.sp, color = TextDarkSecondary)
+                                Text(NumberFormatUtils.formatPrice(sumBalanceCredit), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AccountingCreditRed)
+                            }
                         }
                     }
 
@@ -2282,7 +2667,7 @@ private fun TrialBalanceContent(
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
-                        placeholder = { Text(if (isGeneral) "جستجو در کد یا نام حساب کل..." else "جستجو در کد یا نام حساب معین...", fontSize = 12.sp) },
+                        placeholder = { Text("جستجو در کد، نام یا گروه حساب...", fontSize = 12.sp) },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TextDarkSecondary, modifier = Modifier.size(18.dp)) },
                         trailingIcon = {
                             if (searchQuery.isNotBlank()) {
@@ -2322,8 +2707,86 @@ private fun TrialBalanceContent(
             }
         }
 
-        // ۲. ردیف‌های تراز آزمایشی
-        if (isGeneral) {
+        // ۲. ردیف‌های تراز آزمایشی بر اساس سطح و حالت ستونی
+        if (isSixCol) {
+            if (filteredSixColRows.isEmpty()) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = CleanSurface),
+                        border = BorderStroke(1.dp, CleanBorder)
+                    ) {
+                        Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                            Text("موردی برای نمایش در تراز ۶ ستونی یافت نشد.", fontSize = 12.sp, color = TextDarkSecondary)
+                        }
+                    }
+                }
+            } else {
+                items(filteredSixColRows) { row ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = CleanSurface),
+                        border = BorderStroke(1.dp, CleanBorder),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Surface(shape = RoundedCornerShape(6.dp), color = NavyPrimary.copy(alpha = 0.08f)) {
+                                        Text(
+                                            text = NumberFormatUtils.toPersianDigits(row.code),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp,
+                                            color = NavyPrimary,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                    Text(row.title, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TextDarkPrimary)
+                                }
+                                Text(row.groupTitle, fontSize = 10.sp, color = TextDarkSecondary, fontWeight = FontWeight.Medium)
+                            }
+
+                            Text(
+                                text = "حساب کل: ${row.generalTitle}",
+                                fontSize = 11.sp,
+                                color = TextDarkMuted
+                            )
+
+                            // ۳ جفت ستون ۶گانه
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(CleanBackground, RoundedCornerShape(10.dp))
+                                    .padding(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("۱. قبل / افتتاحیه:", fontSize = 9.sp, color = TextDarkSecondary)
+                                    Text("بد: ${NumberFormatUtils.formatPrice(row.openingDebit)} | بس: ${NumberFormatUtils.formatPrice(row.openingCredit)}", fontSize = 10.sp, color = TextDarkPrimary)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("۲. طی دوره:", fontSize = 9.sp, color = TextDarkSecondary)
+                                    Text("بد: ${NumberFormatUtils.formatPrice(row.periodDebit)} | بس: ${NumberFormatUtils.formatPrice(row.periodCredit)}", fontSize = 10.sp, color = TextDarkPrimary)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("۳. مانده نهایی:", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = NavyPrimary)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text("بد: ${if (row.finalDebit > 0) NumberFormatUtils.formatPrice(row.finalDebit) else "-"}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (row.finalDebit > 0) AccountingDebitGreen else TextDarkMuted)
+                                        Text("بس: ${if (row.finalCredit > 0) NumberFormatUtils.formatPrice(row.finalCredit) else "-"}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (row.finalCredit > 0) AccountingCreditRed else TextDarkMuted)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (isGeneral) {
             if (filteredGenRows.isEmpty()) {
                 item {
                     Card(
@@ -2610,7 +3073,7 @@ private fun ProfitLossContent(
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
                 Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    // ۱. درآمد عملیاتی
+                    // ۱. فروش ناخالص و درآمدهای عملیاتی
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -2618,7 +3081,7 @@ private fun ProfitLossContent(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = AccountingDebitGreen, modifier = Modifier.size(18.dp))
-                            Text("درآمدهای عملیاتی و حاصل از فروش:", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextDarkPrimary)
+                            Text("فروش ناخالص و درآمدهای عملیاتی:", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextDarkPrimary)
                         }
                         Text(
                             text = "${NumberFormatUtils.formatPrice(statement.totalRevenue)} تومان",
@@ -2628,7 +3091,42 @@ private fun ProfitLossContent(
                         )
                     }
 
-                    // ۲. بهای تمام شده
+                    // ۲. کسر می‌شود: برگشت از فروش و تخفیفات
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = MatteGold, modifier = Modifier.size(18.dp))
+                            Text("کسر می‌شود: برگشت از فروش و تخفیفات:", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextDarkPrimary)
+                        }
+                        Text(
+                            text = "(${NumberFormatUtils.formatPrice(statement.salesReturnsAndDiscounts)}) تومان",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MatteGold
+                        )
+                    }
+
+                    HorizontalDivider(color = CleanBorder)
+
+                    // ۳. خالص فروش و درآمدهای عملیاتی
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("خالص درآمدهای فروش و عملیاتی:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = NavyPrimary)
+                        Text(
+                            text = "${NumberFormatUtils.formatPrice(statement.netSalesRevenue)} تومان",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = NavyPrimary
+                        )
+                    }
+
+                    // ۴. بهای تمام شده کالای فروش رفته (COGS)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -2636,7 +3134,7 @@ private fun ProfitLossContent(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = AccountingCreditRed, modifier = Modifier.size(18.dp))
-                            Text("بهای تمام شده کالای فروش رفته (COGS):", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextDarkPrimary)
+                            Text("کسر می‌شود: بهای تمام شده کالای فروش رفته (COGS):", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextDarkPrimary)
                         }
                         Text(
                             text = "(${NumberFormatUtils.formatPrice(statement.costOfGoodsSold)}) تومان",
@@ -2648,7 +3146,7 @@ private fun ProfitLossContent(
 
                     HorizontalDivider(color = CleanBorder)
 
-                    // ۳. سود ناخالص
+                    // ۵. سود (زیان) ناخالص
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -2663,7 +3161,7 @@ private fun ProfitLossContent(
                         )
                     }
 
-                    // ۴. هزینه‌های عمومی و اداری
+                    // ۶. هزینه‌های عمومی، اداری و توزیع
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -2671,7 +3169,7 @@ private fun ProfitLossContent(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = AccountingCreditRed, modifier = Modifier.size(18.dp))
-                            Text("هزینه‌های عمومی، اداری و توزیع:", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextDarkPrimary)
+                            Text("کسر می‌شود: هزینه‌های عمومی، اداری و توزیع:", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextDarkPrimary)
                         }
                         Text(
                             text = "(${NumberFormatUtils.formatPrice(statement.operatingExpenses)}) تومان",
@@ -2681,9 +3179,26 @@ private fun ProfitLossContent(
                         )
                     }
 
+                    HorizontalDivider(color = CleanBorder)
+
+                    // ۷. سود (زیان) عملیاتی
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("سود (زیان) عملیاتی دوره:", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextDarkPrimary)
+                        Text(
+                            text = "${NumberFormatUtils.formatPrice(statement.operatingProfit)} تومان",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = if (statement.operatingProfit >= 0) AccountingDebitGreen else AccountingCreditRed
+                        )
+                    }
+
                     HorizontalDivider(thickness = 2.dp, color = MatteGold)
 
-                    // ۵. سود یا زیان خالص نهایی دوره
+                    // ۸. سود یا زیان خالص نهایی دوره
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = if (statement.netProfit >= 0) AccountingDebitGreen.copy(alpha = 0.08f) else AccountingCreditRed.copy(alpha = 0.08f),
@@ -2718,10 +3233,7 @@ private fun ProfitLossContent(
                         }
                     }
 
-                    // ۶. نسبت‌های مالی کلیدی (حاشیه سود ناخالص و خالص)
-                    val grossMarginPct = if (statement.totalRevenue > 0) (statement.grossProfit.toDouble() / statement.totalRevenue.toDouble() * 100).toInt() else 0
-                    val netMarginPct = if (statement.totalRevenue > 0) (statement.netProfit.toDouble() / statement.totalRevenue.toDouble() * 100).toInt() else 0
-
+                    // ۹. نسبت‌های مالی سه‌گانه استاندارد
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -2732,19 +3244,28 @@ private fun ProfitLossContent(
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("حاشیه سود ناخالص", fontSize = 10.sp, color = TextDarkSecondary)
                             Text(
-                                text = "%${NumberFormatUtils.toPersianDigits(grossMarginPct)}",
+                                text = "%${NumberFormatUtils.toPersianDigits(statement.grossMarginPercent)}",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (grossMarginPct >= 0) NavyPrimary else AccountingCreditRed
+                                color = if (statement.grossMarginPercent >= 0) NavyPrimary else AccountingCreditRed
                             )
                         }
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("حاشیه سود خالص", fontSize = 10.sp, color = TextDarkSecondary)
                             Text(
-                                text = "%${NumberFormatUtils.toPersianDigits(netMarginPct)}",
+                                text = "%${NumberFormatUtils.toPersianDigits(statement.netMarginPercent)}",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (netMarginPct >= 0) AccountingDebitGreen else AccountingCreditRed
+                                color = if (statement.netMarginPercent >= 0) AccountingDebitGreen else AccountingCreditRed
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("نسبت هزینه به درآمد", fontSize = 10.sp, color = TextDarkSecondary)
+                            Text(
+                                text = "%${NumberFormatUtils.toPersianDigits(statement.expenseToRevenuePercent)}",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MatteGold
                             )
                         }
                     }

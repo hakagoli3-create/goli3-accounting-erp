@@ -9,6 +9,7 @@ import com.example.data.model.AccountGroupEntity
 import com.example.data.model.GeneralAccountEntity
 import com.example.data.model.JournalEntryEntity
 import com.example.data.model.JournalItemEntity
+import com.example.data.model.JournalItemWithVoucher
 import com.example.data.model.SubsidiaryAccountEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -125,6 +126,44 @@ interface AccountingDao {
     @Query("DELETE FROM journal_entries WHERE id = :voucherId")
     suspend fun deleteJournalEntryById(voucherId: Long)
 
+    @Query("""
+        SELECT ji.id, ji.voucherId, je.voucherNumber, je.jalaliDate, je.status AS voucherStatus,
+               je.description AS voucherDescription, ji.generalCode, ji.subsidiaryCode,
+               ji.partyId, ji.description, ji.debit, ji.credit
+        FROM journal_items ji
+        INNER JOIN journal_entries je ON ji.voucherId = je.id
+        ORDER BY je.voucherNumber DESC, ji.id ASC
+    """)
+    fun getJournalItemsWithVoucher(): Flow<List<JournalItemWithVoucher>>
+
+    @Query("""
+        SELECT ji.id, ji.voucherId, je.voucherNumber, je.jalaliDate, je.status AS voucherStatus,
+               je.description AS voucherDescription, ji.generalCode, ji.subsidiaryCode,
+               ji.partyId, ji.description, ji.debit, ji.credit
+        FROM journal_items ji
+        INNER JOIN journal_entries je ON ji.voucherId = je.id
+        WHERE ji.subsidiaryCode = :subsidiaryCode
+        ORDER BY je.voucherNumber ASC, ji.id ASC
+    """)
+    fun getJournalItemsWithVoucherBySubsidiary(subsidiaryCode: Int): Flow<List<JournalItemWithVoucher>>
+
+    @Query("""
+        SELECT ji.id, ji.voucherId, je.voucherNumber, je.jalaliDate, je.status AS voucherStatus,
+               je.description AS voucherDescription, ji.generalCode, ji.subsidiaryCode,
+               ji.partyId, ji.description, ji.debit, ji.credit
+        FROM journal_items ji
+        INNER JOIN journal_entries je ON ji.voucherId = je.id
+        WHERE ji.partyId = :partyId
+        ORDER BY je.voucherNumber ASC, ji.id ASC
+    """)
+    fun getJournalItemsWithVoucherByParty(partyId: Long): Flow<List<JournalItemWithVoucher>>
+
+    @Query("UPDATE journal_entries SET status = 'FINAL' WHERE id = :voucherId")
+    suspend fun approveJournalEntry(voucherId: Long)
+
+    @Query("UPDATE journal_entries SET status = :status WHERE id = :voucherId")
+    suspend fun updateJournalEntryStatus(voucherId: Long, status: String)
+
     @Transaction
     suspend fun createVoucherWithItems(
         entry: JournalEntryEntity,
@@ -137,3 +176,4 @@ interface AccountingDao {
         return voucherId
     }
 }
+

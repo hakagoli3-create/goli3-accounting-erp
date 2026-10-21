@@ -18,7 +18,10 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import com.example.data.model.InvoiceWithItems
+import com.example.data.model.JournalItemWithVoucher
+import com.example.data.model.OfficialJournalRow
 import com.example.data.model.PartyEntity
+import com.example.data.model.SixColumnTrialBalanceRow
 import com.example.data.repository.InvoiceRepository
 import com.example.data.repository.PartyRepository
 import kotlinx.coroutines.flow.combine
@@ -39,13 +42,23 @@ data class VoucherItemDraft(
     val credit: Long
 )
 
+/**
+ * صورت سود و زیان چندمرحله‌ای استاندارد حسابداری ایران
+ */
 data class ProfitLossStatement(
-    val totalRevenue: Long,
-    val costOfGoodsSold: Long,
-    val grossProfit: Long,
-    val operatingExpenses: Long,
-    val operatingProfit: Long,
-    val netProfit: Long,
+    val totalRevenue: Long = 0L,                     // ناخالص درآمدهای فروش کالا و خدمات (کد ۶۰۱۰۱)
+    val salesReturnsAndDiscounts: Long = 0L,         // برگشت از فروش و تخفیفات نقدی (کد ۶۰۱۰۲)
+    val netSalesRevenue: Long = 0L,                  // فروش خالص = ناخالص فروش منهای برگشت از فروش
+    val costOfGoodsSold: Long = 0L,                  // بهای تمام شده کالای فروش رفته (کد ۷۰۱۰۱)
+    val grossProfit: Long = 0L,                      // سود (زیان) ناخالص = فروش خالص منهای بهای تمام شده
+    val operatingExpenses: Long = 0L,                // هزینه‌های اداری، عمومی، فروش و تشکیلاتی (کد ۸۰۱۰۱ و ۸۰۱۰۲)
+    val operatingProfit: Long = 0L,                  // سود (زیان) عملیاتی = سود ناخالص منهای هزینه‌های عمومی
+    val otherIncomes: Long = 0L,                     // سایر درآمدها و سودهای غیرعملیاتی
+    val otherExpenses: Long = 0L,                    // سایر هزینه‌های غیرعملیاتی / مالی
+    val netProfit: Long = 0L,                        // سود (زیان) خالص دوره = سود عملیاتی + سایر درآمدها - سایر هزینه‌ها
+    val grossMarginPercent: Double = 0.0,            // درصد حاشیه سود ناخالص
+    val netMarginPercent: Double = 0.0,              // درصد حاشیه سود خالص
+    val expenseToRevenuePercent: Double = 0.0,        // نسبت هزینه‌ها به درآمد
     val revenueBreakdown: List<Pair<String, Long>> = emptyList(),
     val expenseBreakdown: List<Pair<String, Long>> = emptyList()
 )
@@ -68,6 +81,9 @@ class AccountingViewModel(
     val allJournalEntries: StateFlow<List<JournalEntryEntity>> = repository.allJournalEntries
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val allJournalItemsWithVoucher: StateFlow<List<JournalItemWithVoucher>> = repository.allJournalItemsWithVoucher
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val allParties: StateFlow<List<PartyEntity>> = partyRepo.allParties
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -80,11 +96,82 @@ class AccountingViewModel(
     val generalTrialBalance: StateFlow<List<com.example.data.model.GeneralTrialBalanceRow>> = repository.generalTrialBalance
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // محاسبه لحظه‌ای صورت سود و زیان بر اساس کدینگ استاندارد حسابداری ایران
+    // تراز آزمایشی ۶ ستونه جامع
+    val sixColumnTrialBalance: StateFlow<List<SixColumnTrialBalanceRow>> = combine(
+        repository.allSubsidiaries,
+        repository.allGenerals,
+        repository.allGroups,
+        repository.allJournalItemsWithVoucher
+    ) { subs, generals, groups, itemsWithVoucher ->
+        val generalMap = generals.associateBy { it.code }
+        val groupMap = groups.associateBy { it.code }
+
+        subs.map { sub ->
+            val gen = generalMap[sub.generalCode]
+            val grp = gen?.let { groupMap[it.groupCode] }
+
+            val subItems = itemsWithVoucher.filter { it.subsidiaryCode == sub.code && it.voucherStatus != "VOID" }
+            val periodDebit = subItems.sumOf { it.debit }
+            val periodCredit = subItems.sumOf { it.credit }
+
+            val finalNet = periodDebit - periodCredit
+            val finalDebit = if (finalNet > 0) finalNet else 0L
+            val finalCredit = if (finalNet < 0) -finalNet else 0L
+
+            SixColumnTrialBalanceRow(
+                code = sub.code,
+                title = sub.title,
+                generalTitle = gen?.title ?: "کل",
+                groupTitle = grp?.title ?: "گروه",
+                openingDebit = 0L,
+                openingCredit = 0L,
+                periodDebit = periodDebit,
+                periodCredit = periodCredit,
+                finalDebit = finalDebit,
+                finalCredit = finalCredit
+            )
+        }.filter { it.periodDebit > 0 || it.periodCredit > 0 }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // ردیف‌های دفتر روزنامه رسمی (ترتیب تاریخی و شماره سند)
+    val officialJournalRows: StateFlow<List<OfficialJournalRow>> = combine(
+        repository.allJournalEntries,
+        repository.allJournalItemsWithVoucher,
+        repository.allSubsidiaries,
+        partyRepo.allParties
+    ) { _, items, subs, parties ->
+        val subMap = subs.associateBy { it.code }
+        val partyMap = parties.associateBy { it.id }
+
+        items.filter { it.voucherStatus != "VOID" }
+            .sortedWith(compareBy<JournalItemWithVoucher> { it.voucherNumber }.thenBy { it.id })
+            .mapIndexed { index, itm ->
+                val sub = subMap[itm.subsidiaryCode]
+                val party = itm.partyId?.let { partyMap[it] }
+                OfficialJournalRow(
+                    voucherId = itm.voucherId,
+                    voucherNumber = itm.voucherNumber,
+                    jalaliDate = itm.jalaliDate,
+                    voucherDescription = itm.voucherDescription,
+                    rowNumber = index + 1,
+                    accountCode = itm.subsidiaryCode,
+                    accountTitle = sub?.title ?: "معین ${itm.subsidiaryCode}",
+                    partyName = party?.name,
+                    lineDescription = itm.description,
+                    debit = itm.debit,
+                    credit = itm.credit
+                )
+            }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // محاسبه دقیق و چندمرحله‌ای صورت سود و زیان استاندارد حسابداری
     val profitLoss: StateFlow<ProfitLossStatement> = trialBalance.map { rows ->
-        var revenue = 0L
+        var grossSales = 0L
+        var salesReturns = 0L
         var cogs = 0L
-        var expenses = 0L
+        var opExpenses = 0L
+        var otherInc = 0L
+        var otherExp = 0L
         val revList = mutableListOf<Pair<String, Long>>()
         val expList = mutableListOf<Pair<String, Long>>()
 
@@ -92,42 +179,68 @@ class AccountingViewModel(
             val groupCode = row.subsidiaryCode / 10000 // مثلا 60101 -> گروه ۶
             when (groupCode) {
                 6 -> {
-                    val amount = row.totalCredit - row.totalDebit
-                    if (amount != 0L) {
-                        revenue += amount
-                        revList.add(row.title to amount)
+                    if (row.subsidiaryCode == 60102) {
+                        // برگشت از فروش و تخفیفات نقدی
+                        val ret = row.totalDebit - row.totalCredit
+                        if (ret > 0) salesReturns += ret
+                    } else if (row.subsidiaryCode == 60101) {
+                        val amount = row.totalCredit - row.totalDebit
+                        if (amount > 0) {
+                            grossSales += amount
+                            revList.add(row.title to amount)
+                        }
+                    } else {
+                        val amount = row.totalCredit - row.totalDebit
+                        if (amount > 0) {
+                            otherInc += amount
+                            revList.add("سایر درآمدها: ${row.title}" to amount)
+                        }
                     }
                 }
                 7 -> {
                     val amount = row.totalDebit - row.totalCredit
-                    if (amount != 0L) {
+                    if (amount > 0) {
                         cogs += amount
                         expList.add("بهای تمام شده: ${row.title}" to amount)
                     }
                 }
                 8 -> {
                     val amount = row.totalDebit - row.totalCredit
-                    if (amount != 0L) {
-                        expenses += amount
+                    if (amount > 0) {
+                        opExpenses += amount
                         expList.add(row.title to amount)
                     }
                 }
             }
         }
-        val gross = revenue - cogs
-        val operating = gross - expenses
-        val net = operating
+
+        val netSales = maxOf(0L, grossSales - salesReturns)
+        val gross = netSales - cogs
+        val operating = gross - opExpenses
+        val net = operating + otherInc - otherExp
+
+        val grossMargin = if (netSales > 0) (gross.toDouble() / netSales.toDouble()) * 100.0 else 0.0
+        val netMargin = if (netSales > 0) (net.toDouble() / netSales.toDouble()) * 100.0 else 0.0
+        val expToRev = if (netSales > 0) (opExpenses.toDouble() / netSales.toDouble()) * 100.0 else 0.0
+
         ProfitLossStatement(
-            totalRevenue = if (revenue > 0) revenue else 0L,
-            costOfGoodsSold = if (cogs > 0) cogs else 0L,
+            totalRevenue = grossSales,
+            salesReturnsAndDiscounts = salesReturns,
+            netSalesRevenue = netSales,
+            costOfGoodsSold = cogs,
             grossProfit = gross,
-            operatingExpenses = if (expenses > 0) expenses else 0L,
+            operatingExpenses = opExpenses,
             operatingProfit = operating,
+            otherIncomes = otherInc,
+            otherExpenses = otherExp,
             netProfit = net,
+            grossMarginPercent = Math.round(grossMargin * 10.0) / 10.0,
+            netMarginPercent = Math.round(netMargin * 10.0) / 10.0,
+            expenseToRevenuePercent = Math.round(expToRev * 10.0) / 10.0,
             revenueBreakdown = revList,
             expenseBreakdown = expList
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ProfitLossStatement(0, 0, 0, 0, 0, 0))
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ProfitLossStatement())
 
     // State for General & Subsidiary Account Ledger (دفتر معین حساب‌های کل و معین)
     private val _selectedSubsidiaryCodeForLedger = MutableStateFlow<Int?>(null)
@@ -140,6 +253,11 @@ class AccountingViewModel(
     val subsidiaryLedgerEntries: StateFlow<List<JournalItemEntity>> = _selectedSubsidiaryCodeForLedger.flatMapLatest { code ->
         val effectiveCode = code ?: allSubsidiaries.value.firstOrNull()?.code
         if (effectiveCode != null) repository.getJournalItemsBySubsidiary(effectiveCode) else flowOf(emptyList())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val subsidiaryLedgerWithVouchers: StateFlow<List<JournalItemWithVoucher>> = _selectedSubsidiaryCodeForLedger.flatMapLatest { code ->
+        val effectiveCode = code ?: allSubsidiaries.value.firstOrNull()?.code
+        if (effectiveCode != null) repository.getJournalItemsWithVoucherBySubsidiary(effectiveCode) else flowOf(emptyList())
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // State for Party Subsidiary Ledger (دفتر معین اشخاص / تفصیلی)
@@ -155,12 +273,20 @@ class AccountingViewModel(
         if (effectiveId != null) repository.getJournalItemsByParty(effectiveId) else flowOf(emptyList())
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val partyLedgerWithVouchers: StateFlow<List<JournalItemWithVoucher>> = _selectedPartyIdForLedger.flatMapLatest { id ->
+        val effectiveId = id ?: allParties.value.firstOrNull()?.id
+        if (effectiveId != null) repository.getJournalItemsWithVoucherByParty(effectiveId) else flowOf(emptyList())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     // State for creating a new Journal Voucher
     private val _draftVoucherDescription = MutableStateFlow("")
     val draftVoucherDescription: StateFlow<String> = _draftVoucherDescription.asStateFlow()
 
     private val _draftVoucherDate = MutableStateFlow(JalaliDate.now().toStandardString())
     val draftVoucherDate: StateFlow<String> = _draftVoucherDate.asStateFlow()
+
+    private val _draftVoucherType = MutableStateFlow("GENERAL")
+    val draftVoucherType: StateFlow<String> = _draftVoucherType.asStateFlow()
 
     private val _draftItems = MutableStateFlow<List<VoucherItemDraft>>(emptyList())
     val draftItems: StateFlow<List<VoucherItemDraft>> = _draftItems.asStateFlow()
@@ -316,6 +442,10 @@ class AccountingViewModel(
         _draftVoucherDate.value = date
     }
 
+    fun updateDraftType(type: String) {
+        _draftVoucherType.value = type
+    }
+
     fun addDraftItem(item: VoucherItemDraft) {
         _draftItems.value = _draftItems.value + item
     }
@@ -331,7 +461,204 @@ class AccountingViewModel(
     fun clearDraft() {
         _draftItems.value = emptyList()
         _draftVoucherDescription.value = ""
+        _draftVoucherType.value = "GENERAL"
         _draftVoucherDate.value = JalaliDate.now().toStandardString()
+    }
+
+    fun applyPreset(presetType: String) {
+        when (presetType) {
+            "CASH_TO_BANK" -> {
+                _draftVoucherType.value = "SETTLEMENT"
+                _draftVoucherDescription.value = "انتقال وجه نقد از صندوق به حساب جاری بانک"
+                _draftItems.value = listOf(
+                    VoucherItemDraft(
+                        subsidiaryCode = 10102,
+                        subsidiaryTitle = "حساب‌های بانکی و پوز POS",
+                        generalCode = 101,
+                        description = "واریز وجه نقد به حساب بانکی",
+                        debit = 0L,
+                        credit = 0L
+                    ),
+                    VoucherItemDraft(
+                        subsidiaryCode = 10101,
+                        subsidiaryTitle = "صندوق‌های فروشگاه و دخل",
+                        generalCode = 101,
+                        description = "خروج وجه نقد از صندوق جهت واریز به بانک",
+                        debit = 0L,
+                        credit = 0L
+                    )
+                )
+            }
+            "BANK_TO_CASH" -> {
+                _draftVoucherType.value = "SETTLEMENT"
+                _draftVoucherDescription.value = "برداشت نقدی از حساب بانکی به صندوق فروشگاه"
+                _draftItems.value = listOf(
+                    VoucherItemDraft(
+                        subsidiaryCode = 10101,
+                        subsidiaryTitle = "صندوق‌های فروشگاه و دخل",
+                        generalCode = 101,
+                        description = "ورود وجه نقد برداشتی از بانک به صندوق",
+                        debit = 0L,
+                        credit = 0L
+                    ),
+                    VoucherItemDraft(
+                        subsidiaryCode = 10102,
+                        subsidiaryTitle = "حساب‌های بانکی و پوز POS",
+                        generalCode = 101,
+                        description = "برداشت از حساب بانکی",
+                        debit = 0L,
+                        credit = 0L
+                    )
+                )
+            }
+            "EXPENSE_CASH" -> {
+                _draftVoucherType.value = "GENERAL"
+                _draftVoucherDescription.value = "پرداخت نقدی هزینه‌های عمومی و ملزومات"
+                _draftItems.value = listOf(
+                    VoucherItemDraft(
+                        subsidiaryCode = 80102,
+                        subsidiaryTitle = "کرایه حمل، ملزومات و بسته‌بندی",
+                        generalCode = 801,
+                        description = "هزینه خرید ملزومات مصرفی",
+                        debit = 0L,
+                        credit = 0L
+                    ),
+                    VoucherItemDraft(
+                        subsidiaryCode = 10101,
+                        subsidiaryTitle = "صندوق‌های فروشگاه و دخل",
+                        generalCode = 101,
+                        description = "پرداخت نقدی از صندوق",
+                        debit = 0L,
+                        credit = 0L
+                    )
+                )
+            }
+            "PARTY_RECEIVE" -> {
+                _draftVoucherType.value = "SETTLEMENT"
+                _draftVoucherDescription.value = "دریافت وجه از طرف‌حساب بابت تسویه مطالبات"
+                val p = allParties.value.firstOrNull()
+                _draftItems.value = listOf(
+                    VoucherItemDraft(
+                        subsidiaryCode = 10102,
+                        subsidiaryTitle = "حساب‌های بانکی و پوز POS",
+                        generalCode = 101,
+                        description = "واریز بانکی توسط مشتری",
+                        debit = 0L,
+                        credit = 0L
+                    ),
+                    VoucherItemDraft(
+                        subsidiaryCode = 10201,
+                        subsidiaryTitle = "بدهکاران تجاری (مشتریان نسیه)",
+                        generalCode = 102,
+                        partyId = p?.id,
+                        partyName = p?.name,
+                        description = "بستانکار شدن حساب مشتری بابت تسویه",
+                        debit = 0L,
+                        credit = 0L
+                    )
+                )
+            }
+            "PARTY_PAY" -> {
+                _draftVoucherType.value = "SETTLEMENT"
+                _draftVoucherDescription.value = "پرداخت به تامین‌کننده بابت تسویه بدهی تجاری"
+                val p = allParties.value.firstOrNull()
+                _draftItems.value = listOf(
+                    VoucherItemDraft(
+                        subsidiaryCode = 30101,
+                        subsidiaryTitle = "بستانکاران تجاری (تامین‌کنندگان کالا)",
+                        generalCode = 301,
+                        partyId = p?.id,
+                        partyName = p?.name,
+                        description = "بدهکار شدن حساب تامین‌کننده",
+                        debit = 0L,
+                        credit = 0L
+                    ),
+                    VoucherItemDraft(
+                        subsidiaryCode = 10102,
+                        subsidiaryTitle = "حساب‌های بانکی و پوز POS",
+                        generalCode = 101,
+                        description = "پرداخت از حساب بانکی به تامین‌کننده",
+                        debit = 0L,
+                        credit = 0L
+                    )
+                )
+            }
+            "CAPITAL_INJECTION" -> {
+                _draftVoucherType.value = "OPENING"
+                _draftVoucherDescription.value = "افزایش سرمایه و آورده نقدی شرکا به شرکت"
+                _draftItems.value = listOf(
+                    VoucherItemDraft(
+                        subsidiaryCode = 10102,
+                        subsidiaryTitle = "حساب‌های بانکی و پوز POS",
+                        generalCode = 101,
+                        description = "واریز آورده نقدی به حساب بانک",
+                        debit = 0L,
+                        credit = 0L
+                    ),
+                    VoucherItemDraft(
+                        subsidiaryCode = 50101,
+                        subsidiaryTitle = "سرمایه ثبت شده شرکت",
+                        generalCode = 501,
+                        description = "سرمایه اولیه / آورده سهامداران",
+                        debit = 0L,
+                        credit = 0L
+                    )
+                )
+            }
+        }
+    }
+
+    fun autoBalanceDraft(selectedSub: SubsidiaryAccountEntity?) {
+        val items = _draftItems.value
+        val totalDebit = items.sumOf { it.debit }
+        val totalCredit = items.sumOf { it.credit }
+        val diff = totalDebit - totalCredit
+
+        if (diff == 0L) {
+            _operationMessage.value = "سند در حال حاضر کاملاً تراز است."
+            return
+        }
+
+        val sub = selectedSub
+            ?: allSubsidiaries.value.firstOrNull { it.code == if (diff > 0) 10101 else 10102 }
+            ?: allSubsidiaries.value.firstOrNull()
+
+        if (sub == null) {
+            _operationMessage.value = "لطفاً ابتدا یک حساب معین انتخاب کنید."
+            return
+        }
+
+        if (diff > 0) {
+            val balancingItem = VoucherItemDraft(
+                subsidiaryCode = sub.code,
+                subsidiaryTitle = sub.title,
+                generalCode = sub.generalCode,
+                description = "موازنه تراز سند حسابداری",
+                debit = 0L,
+                credit = diff
+            )
+            addDraftItem(balancingItem)
+            _operationMessage.value = "سطر موازنه با مبلغ ${NumberFormatUtils.formatPrice(diff)} بستانکار اضافه شد."
+        } else {
+            val balancingItem = VoucherItemDraft(
+                subsidiaryCode = sub.code,
+                subsidiaryTitle = sub.title,
+                generalCode = sub.generalCode,
+                description = "موازنه تراز سند حسابداری",
+                debit = -diff,
+                credit = 0L
+            )
+            addDraftItem(balancingItem)
+            _operationMessage.value = "سطر موازنه با مبلغ ${NumberFormatUtils.formatPrice(-diff)} بدهکار اضافه شد."
+        }
+    }
+
+    fun approveVoucher(voucher: JournalEntryEntity, onSuccess: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.approveVoucher(voucher.id)
+            _operationMessage.value = "سند شماره ${voucher.voucherNumber} با موفقیت تایید و قطعی شد."
+            onSuccess()
+        }
     }
 
     fun clearMessage() {
@@ -354,10 +681,17 @@ class AccountingViewModel(
                 return@launch
             }
 
+            val prefix = when (_draftVoucherType.value) {
+                "OPENING" -> "[سند افتتاحیه] "
+                "CLOSING" -> "[سند اختتامیه] "
+                "SETTLEMENT" -> "[سند تسویه] "
+                else -> ""
+            }
+
             val entry = JournalEntryEntity(
                 voucherNumber = 0L,
                 jalaliDate = _draftVoucherDate.value,
-                description = _draftVoucherDescription.value.ifBlank { "سند حسابداری دستی" },
+                description = "$prefix${_draftVoucherDescription.value.ifBlank { "سند دوبل حسابداری" }}",
                 isBalanced = true,
                 status = "FINAL"
             )
@@ -648,6 +982,84 @@ class AccountingViewModel(
         val file = ExportHelper.exportReportCsv(context, "صورت سود و زیان", headers, rows)
         if (file != null) {
             ExportHelper.shareFile(context, file, "text/csv", "خروجی اکسل سود و زیان")
+        }
+    }
+
+    fun exportOfficialJournalPdf(context: Context) {
+        val headers = listOf("ردیف", "شماره سند", "تاریخ", "کد معین", "عنوان حساب", "شرح آرتیکل", "بدهکار (تومان)", "بستانکار (تومان)")
+        val rows = officialJournalRows.value.map { r ->
+            listOf(
+                r.rowNumber.toString(),
+                r.voucherNumber.toString(),
+                r.jalaliDate,
+                r.accountCode.toString(),
+                r.accountTitle,
+                r.lineDescription,
+                NumberFormatUtils.formatPrice(r.debit),
+                NumberFormatUtils.formatPrice(r.credit)
+            )
+        }
+        val file = ExportHelper.exportReportPdf(context, "دفتر روزنامه عمومی رسمی حسابداری", headers, rows)
+        if (file != null) {
+            ExportHelper.shareFile(context, file, "application/pdf", "دفتر روزنامه رسمی PDF")
+        }
+    }
+
+    fun exportOfficialJournalCsv(context: Context) {
+        val headers = listOf("ردیف", "شماره سند", "تاریخ", "کد معین", "عنوان حساب", "شرح آرتیکل", "بدهکار", "بستانکار")
+        val rows = officialJournalRows.value.map { r ->
+            listOf(
+                r.rowNumber.toString(),
+                r.voucherNumber.toString(),
+                r.jalaliDate,
+                r.accountCode.toString(),
+                r.accountTitle,
+                r.lineDescription,
+                r.debit.toString(),
+                r.credit.toString()
+            )
+        }
+        val file = ExportHelper.exportReportCsv(context, "دفتر_روزنامه_رسمی", headers, rows)
+        if (file != null) {
+            ExportHelper.shareFile(context, file, "text/csv", "خروجی اکسل دفتر روزنامه")
+        }
+    }
+
+    fun exportSixColumnTrialBalancePdf(context: Context) {
+        val headers = listOf("کد معین", "عنوان حساب", "گروه", "گردش بدهکار", "گردش بستانکار", "مانده بدهکار", "مانده بستانکار")
+        val rows = sixColumnTrialBalance.value.map { r ->
+            listOf(
+                r.code.toString(),
+                r.title,
+                r.groupTitle,
+                NumberFormatUtils.formatPrice(r.periodDebit),
+                NumberFormatUtils.formatPrice(r.periodCredit),
+                NumberFormatUtils.formatPrice(r.finalDebit),
+                NumberFormatUtils.formatPrice(r.finalCredit)
+            )
+        }
+        val file = ExportHelper.exportReportPdf(context, "تراز آزمایشی شش ستونه جامع", headers, rows)
+        if (file != null) {
+            ExportHelper.shareFile(context, file, "application/pdf", "تراز شش ستونه PDF")
+        }
+    }
+
+    fun exportSixColumnTrialBalanceCsv(context: Context) {
+        val headers = listOf("کد معین", "عنوان حساب", "گروه", "گردش بدهکار", "گردش بستانکار", "مانده بدهکار", "مانده بستانکار")
+        val rows = sixColumnTrialBalance.value.map { r ->
+            listOf(
+                r.code.toString(),
+                r.title,
+                r.groupTitle,
+                r.periodDebit.toString(),
+                r.periodCredit.toString(),
+                r.finalDebit.toString(),
+                r.finalCredit.toString()
+            )
+        }
+        val file = ExportHelper.exportReportCsv(context, "تراز_شش_ستونه", headers, rows)
+        if (file != null) {
+            ExportHelper.shareFile(context, file, "text/csv", "خروجی اکسل تراز شش ستونه")
         }
     }
 }

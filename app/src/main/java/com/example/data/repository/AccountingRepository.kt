@@ -8,6 +8,7 @@ import com.example.data.model.AccountGroupEntity
 import com.example.data.model.GeneralAccountEntity
 import com.example.data.model.JournalEntryEntity
 import com.example.data.model.JournalItemEntity
+import com.example.data.model.JournalItemWithVoucher
 import com.example.data.model.SubsidiaryAccountEntity
 import com.example.data.model.TrialBalanceRow
 import kotlinx.coroutines.flow.Flow
@@ -35,6 +36,7 @@ class AccountingRepository(
     val allJournalEntries: Flow<List<JournalEntryEntity>> = dao.getAllJournalEntries()
     val totalDebitSum: Flow<Long?> = dao.getTotalDebitSum()
     val totalCreditSum: Flow<Long?> = dao.getTotalCreditSum()
+    val allJournalItemsWithVoucher: Flow<List<JournalItemWithVoucher>> = dao.getJournalItemsWithVoucher()
 
     fun getGeneralAccountsByGroup(groupCode: Int): Flow<List<GeneralAccountEntity>> =
         dao.getGeneralAccountsByGroup(groupCode)
@@ -51,8 +53,22 @@ class AccountingRepository(
     fun getJournalItemsBySubsidiary(subsidiaryCode: Int): Flow<List<JournalItemEntity>> =
         dao.getJournalItemsBySubsidiary(subsidiaryCode)
 
+    fun getJournalItemsWithVoucherBySubsidiary(subsidiaryCode: Int): Flow<List<JournalItemWithVoucher>> =
+        dao.getJournalItemsWithVoucherBySubsidiary(subsidiaryCode)
+
+    fun getJournalItemsWithVoucherByParty(partyId: Long): Flow<List<JournalItemWithVoucher>> =
+        dao.getJournalItemsWithVoucherByParty(partyId)
+
     suspend fun getJournalItemsByVoucherSync(voucherId: Long): List<JournalItemEntity> =
         dao.getJournalItemsByVoucherSync(voucherId)
+
+    suspend fun approveVoucher(voucherId: Long) = runInTransaction {
+        dao.approveJournalEntry(voucherId)
+    }
+
+    suspend fun updateVoucherStatus(voucherId: Long, status: String) = runInTransaction {
+        dao.updateJournalEntryStatus(voucherId, status)
+    }
 
     suspend fun insertGeneralAccount(account: GeneralAccountEntity): Result<Long> = runCatching {
         runInTransaction {

@@ -122,3 +122,55 @@ data class GeneralTrialBalanceRow(
     val balanceCredit: Long
 )
 
+/**
+ * ردیف گردش دفتر معین و روزنامه به همراه اطلاعات سند متصل
+ */
+data class JournalItemWithVoucher(
+    val id: Long,
+    val voucherId: Long,
+    val voucherNumber: Long,
+    val jalaliDate: String,
+    val voucherStatus: String,
+    val voucherDescription: String,
+    val generalCode: Int,
+    val subsidiaryCode: Int,
+    val partyId: Long? = null,
+    val description: String,
+    val debit: Long = 0L,
+    val credit: Long = 0L
+)
+
+/**
+ * تراز آزمایشی ۶ ستونه جامع (مانده ابتدای دوره، گردش طی دوره، مانده پایان دوره)
+ */
+data class SixColumnTrialBalanceRow(
+    val code: Int,
+    val title: String,
+    val generalTitle: String,
+    val groupTitle: String,
+    val openingDebit: Long,
+    val openingCredit: Long,
+    val periodDebit: Long,
+    val periodCredit: Long,
+    val finalDebit: Long,
+    val finalCredit: Long
+)
+
+/**
+ * ردیف دفتر روزنامه رسمی حسابداری
+ */
+data class OfficialJournalRow(
+    val voucherId: Long,
+    val voucherNumber: Long,
+    val jalaliDate: String,
+    val voucherDescription: String,
+    val rowNumber: Int,
+    val accountCode: Int,
+    val accountTitle: String,
+    val partyName: String? = null,
+    val lineDescription: String,
+    val debit: Long,
+    val credit: Long
+)
+
+
