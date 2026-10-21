@@ -111,3 +111,14 @@ data class TrialBalanceRow(
     val balanceDebit: Long,
     val balanceCredit: Long
 )
+
+data class GeneralTrialBalanceRow(
+    val generalCode: Int,
+    val title: String,
+    val groupTitle: String,
+    val totalDebit: Long,
+    val totalCredit: Long,
+    val balanceDebit: Long,
+    val balanceCredit: Long
+)
+

@@ -32,6 +32,8 @@ data class VoucherItemDraft(
     val subsidiaryCode: Int,
     val subsidiaryTitle: String,
     val generalCode: Int,
+    val partyId: Long? = null,
+    val partyName: String? = null,
     val description: String,
     val debit: Long,
     val credit: Long
@@ -42,7 +44,10 @@ data class ProfitLossStatement(
     val costOfGoodsSold: Long,
     val grossProfit: Long,
     val operatingExpenses: Long,
-    val netProfit: Long
+    val operatingProfit: Long,
+    val netProfit: Long,
+    val revenueBreakdown: List<Pair<String, Long>> = emptyList(),
+    val expenseBreakdown: List<Pair<String, Long>> = emptyList()
 )
 
 class AccountingViewModel(
@@ -72,32 +77,72 @@ class AccountingViewModel(
     val trialBalance: StateFlow<List<TrialBalanceRow>> = repository.trialBalance
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // محاسبه لحظه‌ای صورت سود و زیان بر اساس کدینگ استاندارد
+    val generalTrialBalance: StateFlow<List<com.example.data.model.GeneralTrialBalanceRow>> = repository.generalTrialBalance
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // محاسبه لحظه‌ای صورت سود و زیان بر اساس کدینگ استاندارد حسابداری ایران
     val profitLoss: StateFlow<ProfitLossStatement> = trialBalance.map { rows ->
         var revenue = 0L
         var cogs = 0L
         var expenses = 0L
+        val revList = mutableListOf<Pair<String, Long>>()
+        val expList = mutableListOf<Pair<String, Long>>()
 
         for (row in rows) {
             val groupCode = row.subsidiaryCode / 10000 // مثلا 60101 -> گروه ۶
             when (groupCode) {
-                6 -> revenue += (row.totalCredit - row.totalDebit)
-                7 -> cogs += (row.totalDebit - row.totalCredit)
-                8 -> expenses += (row.totalDebit - row.totalCredit)
+                6 -> {
+                    val amount = row.totalCredit - row.totalDebit
+                    if (amount != 0L) {
+                        revenue += amount
+                        revList.add(row.title to amount)
+                    }
+                }
+                7 -> {
+                    val amount = row.totalDebit - row.totalCredit
+                    if (amount != 0L) {
+                        cogs += amount
+                        expList.add("بهای تمام شده: ${row.title}" to amount)
+                    }
+                }
+                8 -> {
+                    val amount = row.totalDebit - row.totalCredit
+                    if (amount != 0L) {
+                        expenses += amount
+                        expList.add(row.title to amount)
+                    }
+                }
             }
         }
         val gross = revenue - cogs
-        val net = gross - expenses
+        val operating = gross - expenses
+        val net = operating
         ProfitLossStatement(
             totalRevenue = if (revenue > 0) revenue else 0L,
             costOfGoodsSold = if (cogs > 0) cogs else 0L,
             grossProfit = gross,
             operatingExpenses = if (expenses > 0) expenses else 0L,
-            netProfit = net
+            operatingProfit = operating,
+            netProfit = net,
+            revenueBreakdown = revList,
+            expenseBreakdown = expList
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ProfitLossStatement(0, 0, 0, 0, 0))
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ProfitLossStatement(0, 0, 0, 0, 0, 0))
 
-    // State for Party Subsidiary Ledger (دفتر معین اشخاص)
+    // State for General & Subsidiary Account Ledger (دفتر معین حساب‌های کل و معین)
+    private val _selectedSubsidiaryCodeForLedger = MutableStateFlow<Int?>(null)
+    val selectedSubsidiaryCodeForLedger: StateFlow<Int?> = _selectedSubsidiaryCodeForLedger.asStateFlow()
+
+    val selectedSubsidiaryForLedger: StateFlow<SubsidiaryAccountEntity?> = combine(allSubsidiaries, _selectedSubsidiaryCodeForLedger) { subs, code ->
+        if (code != null) subs.find { it.code == code } else subs.firstOrNull()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val subsidiaryLedgerEntries: StateFlow<List<JournalItemEntity>> = _selectedSubsidiaryCodeForLedger.flatMapLatest { code ->
+        val effectiveCode = code ?: allSubsidiaries.value.firstOrNull()?.code
+        if (effectiveCode != null) repository.getJournalItemsBySubsidiary(effectiveCode) else flowOf(emptyList())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // State for Party Subsidiary Ledger (دفتر معین اشخاص / تفصیلی)
     private val _selectedPartyIdForLedger = MutableStateFlow<Long?>(null)
     val selectedPartyIdForLedger: StateFlow<Long?> = _selectedPartyIdForLedger.asStateFlow()
 
@@ -122,6 +167,10 @@ class AccountingViewModel(
 
     private val _operationMessage = MutableStateFlow<String?>(null)
     val operationMessage: StateFlow<String?> = _operationMessage.asStateFlow()
+
+    fun selectSubsidiaryForLedger(code: Int?) {
+        _selectedSubsidiaryCodeForLedger.value = code
+    }
 
     fun selectPartyForLedger(partyId: Long?) {
         _selectedPartyIdForLedger.value = partyId
@@ -318,6 +367,7 @@ class AccountingViewModel(
                     voucherId = 0L,
                     generalCode = it.generalCode,
                     subsidiaryCode = it.subsidiaryCode,
+                    partyId = it.partyId,
                     description = it.description,
                     debit = it.debit,
                     credit = it.credit
@@ -335,7 +385,201 @@ class AccountingViewModel(
         }
     }
 
+    // --- مدیریت سرفصل‌ها (ایجاد، ویرایش و حذف حساب‌های کل و معین) ---
+
+    fun addGeneralAccount(groupCode: Int, code: Int, title: String, nature: String, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            if (code <= 0 || title.isBlank()) {
+                _operationMessage.value = "کد و عنوان حساب کل را وارد فرمایید."
+                return@launch
+            }
+            val res = repository.insertGeneralAccount(GeneralAccountEntity(code = code, groupCode = groupCode, title = title.trim(), nature = nature))
+            if (res.isSuccess) {
+                _operationMessage.value = "حساب کل «$title» با موفقیت ایجاد شد."
+                onSuccess()
+            } else {
+                _operationMessage.value = "خطا در ثبت حساب کل: ${res.exceptionOrNull()?.message}"
+            }
+        }
+    }
+
+    fun updateGeneralAccount(account: GeneralAccountEntity, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            val res = repository.updateGeneralAccount(account)
+            if (res.isSuccess) {
+                _operationMessage.value = "حساب کل ویرایش شد."
+                onSuccess()
+            }
+        }
+    }
+
+    fun deleteGeneralAccount(account: GeneralAccountEntity, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            val res = repository.deleteGeneralAccount(account)
+            if (res.isSuccess) {
+                _operationMessage.value = "حساب کل حذف گردید."
+                onSuccess()
+            } else {
+                _operationMessage.value = "امکان حذف حساب کل به دلیل داشتن زیرمجموعه یا گردش وجود ندارد."
+            }
+        }
+    }
+
+    fun addSubsidiaryAccount(generalCode: Int, code: Int, title: String, nature: String, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            if (code <= 0 || title.isBlank()) {
+                _operationMessage.value = "کد و عنوان حساب معین را وارد فرمایید."
+                return@launch
+            }
+            val res = repository.insertSubsidiaryAccount(SubsidiaryAccountEntity(code = code, generalCode = generalCode, title = title.trim(), nature = nature))
+            if (res.isSuccess) {
+                _operationMessage.value = "حساب معین «$title» با موفقیت افزوده شد."
+                onSuccess()
+            } else {
+                _operationMessage.value = "خطا در ثبت حساب معین: ${res.exceptionOrNull()?.message}"
+            }
+        }
+    }
+
+    fun updateSubsidiaryAccount(account: SubsidiaryAccountEntity, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            val res = repository.updateSubsidiaryAccount(account)
+            if (res.isSuccess) {
+                _operationMessage.value = "حساب معین ویرایش شد."
+                onSuccess()
+            }
+        }
+    }
+
+    fun deleteSubsidiaryAccount(account: SubsidiaryAccountEntity, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            val res = repository.deleteSubsidiaryAccount(account)
+            if (res.isSuccess) {
+                _operationMessage.value = "حساب معین با موفقیت حذف شد."
+                onSuccess()
+            } else {
+                _operationMessage.value = "امکان حذف حساب معین به دلیل داشتن آرتیکل در اسناد وجود ندارد."
+            }
+        }
+    }
+
+    suspend fun getVoucherItems(voucherId: Long): List<JournalItemEntity> {
+        return repository.getJournalItemsByVoucherSync(voucherId)
+    }
+
     // --- Exports for Trial Balance, Journal, and Profit & Loss ---
+
+    fun exportSubsidiaryLedgerPdf(context: Context, sub: SubsidiaryAccountEntity, items: List<JournalItemEntity>) {
+        val headers = listOf("ردیف", "شماره سند", "شرح آرتیکل سند", "بدهکار (تومان)", "بستانکار (تومان)", "مانده تجمعی", "تشخیص")
+        var running = 0L
+        val rows = items.mapIndexed { idx, itm ->
+            running += (itm.debit - itm.credit)
+            val diag = when {
+                running > 0 -> "بد"
+                running < 0 -> "بس"
+                else -> "تسویه"
+            }
+            listOf(
+                (idx + 1).toString(),
+                "سند ${itm.voucherId}",
+                itm.description,
+                NumberFormatUtils.formatPrice(itm.debit),
+                NumberFormatUtils.formatPrice(itm.credit),
+                NumberFormatUtils.formatPrice(Math.abs(running)),
+                diag
+            )
+        }
+        val file = ExportHelper.exportReportPdf(context, "دفتر معین حساب ${sub.title} (${sub.code})", headers, rows)
+        if (file != null) {
+            ExportHelper.shareFile(context, file, "application/pdf", "دفتر معین ${sub.title} PDF")
+        }
+    }
+
+    fun exportSubsidiaryLedgerCsv(context: Context, sub: SubsidiaryAccountEntity, items: List<JournalItemEntity>) {
+        val headers = listOf("ردیف", "شماره سند", "شرح", "بدهکار", "بستانکار", "مانده", "تشخیص")
+        var running = 0L
+        val rows = items.mapIndexed { idx, itm ->
+            running += (itm.debit - itm.credit)
+            val diag = when {
+                running > 0 -> "بد"
+                running < 0 -> "بس"
+                else -> "تسویه"
+            }
+            listOf(
+                (idx + 1).toString(),
+                itm.voucherId.toString(),
+                itm.description,
+                itm.debit.toString(),
+                itm.credit.toString(),
+                Math.abs(running).toString(),
+                diag
+            )
+        }
+        val file = ExportHelper.exportReportCsv(context, "معین_${sub.code}_${sub.title}", headers, rows)
+        if (file != null) {
+            ExportHelper.shareFile(context, file, "text/csv", "خروجی اکسل دفتر معین")
+        }
+    }
+
+    fun exportGeneralTrialBalancePdf(context: Context) {
+        val headers = listOf("کد کل", "عنوان حساب کل", "گروه حساب", "گردش بدهکار", "گردش بستانکار", "مانده بدهکار", "مانده بستانکار")
+        val rows = generalTrialBalance.value.map { r ->
+            listOf(
+                r.generalCode.toString(),
+                r.title,
+                r.groupTitle,
+                NumberFormatUtils.formatPrice(r.totalDebit),
+                NumberFormatUtils.formatPrice(r.totalCredit),
+                NumberFormatUtils.formatPrice(r.balanceDebit),
+                NumberFormatUtils.formatPrice(r.balanceCredit)
+            )
+        }
+        val file = ExportHelper.exportReportPdf(context, "تراز آزمایشی چهارستونی سطح کل", headers, rows)
+        if (file != null) {
+            ExportHelper.shareFile(context, file, "application/pdf", "تراز کل PDF")
+        }
+    }
+
+    fun exportGeneralTrialBalanceCsv(context: Context) {
+        val headers = listOf("کد کل", "عنوان حساب کل", "گروه", "گردش بدهکار", "گردش بستانکار", "مانده بدهکار", "مانده بستانکار")
+        val rows = generalTrialBalance.value.map { r ->
+            listOf(
+                r.generalCode.toString(),
+                r.title,
+                r.groupTitle,
+                r.totalDebit.toString(),
+                r.totalCredit.toString(),
+                r.balanceDebit.toString(),
+                r.balanceCredit.toString()
+            )
+        }
+        val file = ExportHelper.exportReportCsv(context, "تراز_آزمایشی_کل", headers, rows)
+        if (file != null) {
+            ExportHelper.shareFile(context, file, "text/csv", "خروجی اکسل تراز کل")
+        }
+    }
+
+    fun exportSingleVoucherPdf(context: Context, voucher: JournalEntryEntity, items: List<JournalItemEntity>) {
+        val headers = listOf("ردیف", "کد معین", "شرح آرتیکل سند", "بدهکار (تومان)", "بستانکار (تومان)")
+        val rows = items.mapIndexed { idx, itm ->
+            listOf(
+                (idx + 1).toString(),
+                itm.subsidiaryCode.toString(),
+                itm.description,
+                NumberFormatUtils.formatPrice(itm.debit),
+                NumberFormatUtils.formatPrice(itm.credit)
+            )
+        }
+        val file = ExportHelper.exportReportPdf(
+            context,
+            "سند حسابداری شماره ${voucher.voucherNumber} مورخ ${voucher.jalaliDate} - ${voucher.description}",
+            headers,
+            rows
+        )
+        if (file != null) {
+            ExportHelper.shareFile(context, file, "application/pdf", "سند ${voucher.voucherNumber} PDF")
+        }
+    }
 
     fun exportTrialBalancePdf(context: Context) {
         val headers = listOf("کد معین", "عنوان حساب معین", "حساب کل", "گردش بدهکار", "گردش بستانکار", "مانده بدهکار", "مانده بستانکار")

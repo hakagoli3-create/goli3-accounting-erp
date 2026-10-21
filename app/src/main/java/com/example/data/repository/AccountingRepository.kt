@@ -48,8 +48,51 @@ class AccountingRepository(
     suspend fun getJournalItemsSync(voucherId: Long): List<JournalItemEntity> =
         dao.getJournalItemsByVoucherSync(voucherId)
 
+    fun getJournalItemsBySubsidiary(subsidiaryCode: Int): Flow<List<JournalItemEntity>> =
+        dao.getJournalItemsBySubsidiary(subsidiaryCode)
+
+    suspend fun getJournalItemsByVoucherSync(voucherId: Long): List<JournalItemEntity> =
+        dao.getJournalItemsByVoucherSync(voucherId)
+
+    suspend fun insertGeneralAccount(account: GeneralAccountEntity): Result<Long> = runCatching {
+        runInTransaction {
+            dao.insertGeneralAccount(account)
+        }
+    }
+
+    suspend fun updateGeneralAccount(account: GeneralAccountEntity): Result<Unit> = runCatching {
+        runInTransaction {
+            dao.updateGeneralAccount(account)
+        }
+    }
+
+    suspend fun deleteGeneralAccount(account: GeneralAccountEntity): Result<Unit> = runCatching {
+        runInTransaction {
+            dao.deleteGeneralAccount(account)
+        }
+    }
+
+    suspend fun insertSubsidiaryAccount(account: SubsidiaryAccountEntity): Result<Long> = runCatching {
+        runInTransaction {
+            dao.insertSubsidiaryAccount(account)
+        }
+    }
+
+    suspend fun updateSubsidiaryAccount(account: SubsidiaryAccountEntity): Result<Unit> = runCatching {
+        runInTransaction {
+            dao.updateSubsidiaryAccount(account)
+        }
+    }
+
+    suspend fun deleteSubsidiaryAccount(account: SubsidiaryAccountEntity): Result<Unit> = runCatching {
+        runInTransaction {
+            dao.deleteSubsidiaryAccount(account)
+        }
+    }
+
     /**
      * ثبت سند دوبل حسابداری با اعتبارسنجی تراز بودن (مجموع بدهکار = مجموع بستانکار)
+     * و اعمال اتوماتیک گردش و مانده حساب طرف‌حساب‌ها (حساب‌های تفصیلی)
      */
     suspend fun createJournalVoucher(
         entry: JournalEntryEntity,
@@ -69,13 +112,26 @@ class AccountingRepository(
         }
 
         val voucherId = runInTransaction {
-            dao.createVoucherWithItems(entry.copy(isBalanced = true), items)
+            val vId = dao.createVoucherWithItems(entry.copy(isBalanced = true), items)
+            // اعمال تغییرات مانده اشخاص متصل به آرتیکل‌های سند
+            val partyDao = appDatabase?.partyDao()
+            if (partyDao != null) {
+                items.forEach { itm ->
+                    if (itm.partyId != null) {
+                        val net = itm.debit - itm.credit
+                        if (net != 0L) {
+                            partyDao.updatePartyBalance(itm.partyId, net)
+                        }
+                    }
+                }
+            }
+            vId
         }
         return Result.success(voucherId)
     }
 
     /**
-     * گزارش تراز آزمایشی کل/معین با محاسبه مانده بدهکار و بستانکار
+     * گزارش تراز آزمایشی معین (۴ ستونه / ۲ ستونه)
      */
     val trialBalance: Flow<List<TrialBalanceRow>> = combine(
         dao.getAllSubsidiaryAccounts(),
@@ -102,6 +158,38 @@ class AccountingRepository(
                 subsidiaryCode = sub.code,
                 title = sub.title,
                 generalTitle = gen?.title ?: "نامشخص",
+                groupTitle = grp?.title ?: "نامشخص",
+                totalDebit = totalDebit,
+                totalCredit = totalCredit,
+                balanceDebit = balanceDebit,
+                balanceCredit = balanceCredit
+            )
+        }.filter { it.totalDebit > 0 || it.totalCredit > 0 }
+    }
+
+    /**
+     * گزارش تراز آزمایشی در سطح حساب‌های کل
+     */
+    val generalTrialBalance: Flow<List<com.example.data.model.GeneralTrialBalanceRow>> = combine(
+        dao.getAllGeneralAccounts(),
+        dao.getAllAccountGroups(),
+        dao.getAllJournalItems()
+    ) { generals, groups, items ->
+        val groupMap = groups.associateBy { it.code }
+
+        generals.map { gen ->
+            val grp = groupMap[gen.groupCode]
+            val genItems = items.filter { it.generalCode == gen.code }
+            val totalDebit = genItems.sumOf { it.debit }
+            val totalCredit = genItems.sumOf { it.credit }
+
+            val balance = totalDebit - totalCredit
+            val balanceDebit = if (balance > 0) balance else 0L
+            val balanceCredit = if (balance < 0) -balance else 0L
+
+            com.example.data.model.GeneralTrialBalanceRow(
+                generalCode = gen.code,
+                title = gen.title,
                 groupTitle = grp?.title ?: "نامشخص",
                 totalDebit = totalDebit,
                 totalCredit = totalCredit,

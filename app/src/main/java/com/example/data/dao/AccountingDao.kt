@@ -32,6 +32,15 @@ interface AccountingDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertGeneralAccounts(accounts: List<GeneralAccountEntity>)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertGeneralAccount(account: GeneralAccountEntity): Long
+
+    @androidx.room.Update
+    suspend fun updateGeneralAccount(account: GeneralAccountEntity)
+
+    @androidx.room.Delete
+    suspend fun deleteGeneralAccount(account: GeneralAccountEntity)
+
     // Subsidiary Accounts
     @Query("SELECT * FROM subsidiary_accounts ORDER BY code ASC")
     fun getAllSubsidiaryAccounts(): Flow<List<SubsidiaryAccountEntity>>
@@ -41,6 +50,18 @@ interface AccountingDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSubsidiaryAccounts(accounts: List<SubsidiaryAccountEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSubsidiaryAccount(account: SubsidiaryAccountEntity): Long
+
+    @androidx.room.Update
+    suspend fun updateSubsidiaryAccount(account: SubsidiaryAccountEntity)
+
+    @androidx.room.Delete
+    suspend fun deleteSubsidiaryAccount(account: SubsidiaryAccountEntity)
+
+    @Query("SELECT * FROM journal_items WHERE subsidiaryCode = :subsidiaryCode ORDER BY id ASC")
+    fun getJournalItemsBySubsidiary(subsidiaryCode: Int): Flow<List<JournalItemEntity>>
 
     // Journal Entries (اسناد حسابداری)
     @Query("SELECT * FROM journal_entries ORDER BY voucherNumber DESC")
