@@ -87,6 +87,12 @@ interface TreasuryDao {
     @Delete
     suspend fun deleteCheque(cheque: ChequeEntity)
 
+    @Query("DELETE FROM cheques WHERE notes LIKE '%' || :invoiceNumber || '%'")
+    suspend fun deleteChequesByInvoiceNumber(invoiceNumber: String): Int
+
+    @Query("SELECT * FROM cheques WHERE notes LIKE '%' || :invoiceNumber || '%' LIMIT 1")
+    suspend fun getChequeByInvoiceNumber(invoiceNumber: String): ChequeEntity?
+
     // Multi-Currency Balances for Cash Desks and Bank Accounts
     @Query("SELECT * FROM treasury_currency_balances ORDER BY currencyCode ASC")
     fun getAllCurrencyBalances(): Flow<List<com.example.data.model.TreasuryCurrencyBalanceEntity>>

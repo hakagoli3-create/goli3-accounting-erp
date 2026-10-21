@@ -76,6 +76,12 @@ fun InvoiceSettlementDialog(
     currencySymbol: String = "تومان",
     currencyRateToBase: Double = 1.0,
     invoiceType: String = "SALE",
+    initialPaymentType: String = "CASH",
+    initialCashAmount: Long = 0L,
+    initialPosAmount: Long = 0L,
+    initialChequeAmount: Long = 0L,
+    initialCreditAmount: Long = 0L,
+    initialNotes: String = "",
     onDismiss: () -> Unit,
     onConfirmSettlement: (
         paymentType: String,
@@ -93,7 +99,7 @@ fun InvoiceSettlementDialog(
     ) -> Unit
 ) {
     val context = LocalContext.current
-    var mode by remember { mutableStateOf("CASH") } // "CASH", "POS", "CREDIT", "CHEQUE", "MIXED"
+    var mode by remember(initialPaymentType) { mutableStateOf(initialPaymentType) }
 
     var selectedCashDeskId by remember {
         mutableLongStateOf(cashDesks.firstOrNull()?.id ?: 1L)
@@ -102,16 +108,24 @@ fun InvoiceSettlementDialog(
         mutableLongStateOf(bankAccounts.firstOrNull()?.id ?: 1L)
     }
 
-    var cashInput by remember { mutableStateOf(totalAmount.toString()) }
-    var posInput by remember { mutableStateOf("0") }
-    var chequeInput by remember { mutableStateOf("0") }
-    var creditInput by remember { mutableStateOf("0") }
+    var cashInput by remember(initialPaymentType, initialCashAmount, totalAmount) {
+        mutableStateOf(if (initialPaymentType == "CASH") totalAmount.toString() else if (initialCashAmount > 0) initialCashAmount.toString() else "0")
+    }
+    var posInput by remember(initialPaymentType, initialPosAmount, totalAmount) {
+        mutableStateOf(if (initialPaymentType == "POS") totalAmount.toString() else if (initialPosAmount > 0) initialPosAmount.toString() else "0")
+    }
+    var chequeInput by remember(initialPaymentType, initialChequeAmount, totalAmount) {
+        mutableStateOf(if (initialPaymentType == "CHEQUE") totalAmount.toString() else if (initialChequeAmount > 0) initialChequeAmount.toString() else "0")
+    }
+    var creditInput by remember(initialPaymentType, initialCreditAmount, totalAmount) {
+        mutableStateOf(if (initialPaymentType == "CREDIT") totalAmount.toString() else if (initialCreditAmount > 0) initialCreditAmount.toString() else "0")
+    }
 
     var chequeNumber by remember { mutableStateOf("") }
     var sayadNumber by remember { mutableStateOf("") }
     var chequeDueDate by remember { mutableStateOf(JalaliDate.now().addDays(30).toStandardString()) }
     var chequeBankName by remember { mutableStateOf("بانک ملی ایران") }
-    var notes by remember { mutableStateOf("") }
+    var notes by remember(initialNotes) { mutableStateOf(initialNotes) }
 
     var cashDeskExpanded by remember { mutableStateOf(false) }
     var bankAccountExpanded by remember { mutableStateOf(false) }
@@ -478,7 +492,8 @@ fun InvoiceSettlementDialog(
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("مانده تسویه نشده:", fontSize = 12.sp)
                             Text(
@@ -488,6 +503,26 @@ fun InvoiceSettlementDialog(
                                 fontSize = 12.sp
                             )
                         }
+                        if (mode == "MIXED" && remainingBalance > 0L) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = PersianGold.copy(alpha = 0.15f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        creditInput = (creditVal + remainingBalance).toString()
+                                    }
+                                    .padding(vertical = 4.dp, horizontal = 6.dp)
+                            ) {
+                                Text(
+                                    text = "تخصیص خودکار مانده (${NumberFormatUtils.formatPrice(remainingBalance)} تومان) به نسیه",
+                                    fontSize = 11.sp,
+                                    color = PersianGold,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -495,20 +530,29 @@ fun InvoiceSettlementDialog(
 
                 Button(
                     onClick = {
-                        if (mode == "CREDIT" || (mode == "MIXED" && creditVal > 0)) {
-                            if (selectedParty == null) {
-                                Toast.makeText(context, "لطفاً ابتدا $partyRoleName را برای ثبت نسیه انتخاب کنید.", Toast.LENGTH_SHORT).show()
-                                return@Button
-                            }
-                            if (!isPurchaseOrReturnPurchase && selectedParty.partyType != "SUPPLIER" && !selectedParty.canAcceptCredit(creditVal)) {
-                                Toast.makeText(context, "مبلغ نسیه از سقف اعتبار مشتری فراتر است!", Toast.LENGTH_SHORT).show()
+                        var finalCredit = creditVal
+                        if (mode == "MIXED") {
+                            if (remainingBalance > 0L) {
+                                if (selectedParty == null) {
+                                    Toast.makeText(context, "مجموع پرداختی کمتر از مبلغ فاکتور است. برای ثبت مانده به صورت نسیه، مشخص کردن $partyRoleName الزامی است.", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
+                                finalCredit += remainingBalance
+                            } else if (remainingBalance < 0L) {
+                                Toast.makeText(context, "مجموع مبالغ پرداختی از مبلغ فاکتور بیشتر است!", Toast.LENGTH_SHORT).show()
                                 return@Button
                             }
                         }
 
-                        if (remainingBalance != 0L && mode == "MIXED") {
-                            Toast.makeText(context, "مجموع پرداختی با مبلغ فاکتور برابر نیست!", Toast.LENGTH_SHORT).show()
-                            return@Button
+                        if (mode == "CREDIT" || (mode == "MIXED" && finalCredit > 0)) {
+                            if (selectedParty == null) {
+                                Toast.makeText(context, "لطفاً ابتدا $partyRoleName را برای ثبت نسیه انتخاب کنید.", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            if (!isPurchaseOrReturnPurchase && selectedParty.partyType != "SUPPLIER" && !selectedParty.canAcceptCredit(finalCredit)) {
+                                Toast.makeText(context, "مبلغ نسیه از سقف اعتبار مشتری فراتر است!", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
                         }
 
                         onConfirmSettlement(
@@ -516,7 +560,7 @@ fun InvoiceSettlementDialog(
                             cashVal,
                             posVal,
                             chequeVal,
-                            creditVal,
+                            finalCredit,
                             selectedCashDeskId,
                             selectedBankAccountId,
                             chequeNumber,

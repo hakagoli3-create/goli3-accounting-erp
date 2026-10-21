@@ -152,6 +152,12 @@ fun InvoiceScreen(
     val currentInvoiceType by viewModel.currentInvoiceType.collectAsStateWithLifecycle()
     val editingInvoiceId by viewModel.editingInvoiceId.collectAsStateWithLifecycle()
     val editingInvoiceNumber by viewModel.editingInvoiceNumber.collectAsStateWithLifecycle()
+    val editingPaymentType by viewModel.editingPaymentType.collectAsStateWithLifecycle()
+    val editingCashAmount by viewModel.editingCashAmount.collectAsStateWithLifecycle()
+    val editingPosAmount by viewModel.editingPosAmount.collectAsStateWithLifecycle()
+    val editingChequeAmount by viewModel.editingChequeAmount.collectAsStateWithLifecycle()
+    val editingCreditAmount by viewModel.editingCreditAmount.collectAsStateWithLifecycle()
+    val editingNotes by viewModel.editingNotes.collectAsStateWithLifecycle()
     val directExpenseAmount by viewModel.directExpenseAmount.collectAsStateWithLifecycle()
     val directExpenseType by viewModel.directExpenseType.collectAsStateWithLifecycle()
     val cashDesks by viewModel.allCashDesks.collectAsStateWithLifecycle()
@@ -194,8 +200,9 @@ fun InvoiceScreen(
     }
 
     val subtotal = cartItems.sumOf { it.totalPrice }
-    val taxable = if (subtotal > discount) subtotal - discount else 0L
-    val tax = if (applyTax) (taxable * 0.10).toLong() else 0L
+    val effectiveDiscount = minOf(maxOf(0L, discount), subtotal)
+    val taxable = subtotal - effectiveDiscount
+    val tax = if (applyTax) Math.round(taxable * 0.10) else 0L
     val grandTotal = taxable + tax + directExpenseAmount
 
     Scaffold(
@@ -369,6 +376,13 @@ fun InvoiceScreen(
             currencyCode = selectedCurrencyCode,
             currencySymbol = currencySymbol,
             currencyRateToBase = invoiceCurrencyRate,
+            invoiceType = currentInvoiceType,
+            initialPaymentType = if (editingInvoiceId != null) editingPaymentType else "CASH",
+            initialCashAmount = if (editingInvoiceId != null) editingCashAmount else 0L,
+            initialPosAmount = if (editingInvoiceId != null) editingPosAmount else 0L,
+            initialChequeAmount = if (editingInvoiceId != null) editingChequeAmount else 0L,
+            initialCreditAmount = if (editingInvoiceId != null) editingCreditAmount else 0L,
+            initialNotes = if (editingInvoiceId != null) editingNotes else "",
             onDismiss = { showSettlementDialog = false },
             onConfirmSettlement = { paymentType, cash, pos, cheque, credit, deskId, bankId, chNum, sayad, due, bankName, notes ->
                 viewModel.checkoutAdvanced(

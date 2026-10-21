@@ -49,7 +49,8 @@ class InvoiceRepository(
      */
     suspend fun createInvoice(
         invoice: InvoiceEntity,
-        items: List<InvoiceItemEntity>
+        items: List<InvoiceItemEntity>,
+        cheque: com.example.data.model.ChequeEntity? = null
     ): Long = runInTransaction {
         val invoiceId = invoiceDao.createInvoiceWithItems(invoice, items)
 
@@ -58,14 +59,18 @@ class InvoiceRepository(
             return@runInTransaction invoiceId
         }
 
-        applyInvoiceEffects(invoice.copy(id = invoiceId), items)
+        applyInvoiceEffects(invoice.copy(id = invoiceId), items, cheque)
         invoiceId
     }
 
     /**
      * اعمال اثرات انبارداری، حسابداری، و خزانه‌داری یک فاکتور قطعی
      */
-    private suspend fun applyInvoiceEffects(invoice: InvoiceEntity, items: List<InvoiceItemEntity>) {
+    private suspend fun applyInvoiceEffects(
+        invoice: InvoiceEntity,
+        items: List<InvoiceItemEntity>,
+        cheque: com.example.data.model.ChequeEntity? = null
+    ) {
         // اطمینان از وجود انبار معتبر جهت رعایت کامل قیود کلید خارجی
         val validWarehouseId = try {
             val wh = inventoryDao.getWarehouseById(invoice.warehouseId)
@@ -117,13 +122,19 @@ class InvoiceRepository(
         }
 
         val creditAmount = if (invoice.paymentType == "CREDIT") invoice.totalAmount else invoice.creditAmount
-        var creditInBase = if (invoice.creditAmountInBase > 0) invoice.creditAmountInBase else toBase(creditAmount)
-        var cashInBase = if (invoice.cashAmountInBase > 0) invoice.cashAmountInBase else toBase(invoice.cashAmount)
-        var posInBase = if (invoice.posAmountInBase > 0) invoice.posAmountInBase else toBase(invoice.posAmount)
-        var chequeInBase = if (invoice.chequeAmountInBase > 0) invoice.chequeAmountInBase else toBase(invoice.chequeAmount)
-        val totalInBase = if (invoice.totalAmountInBase > 0) invoice.totalAmountInBase else toBase(invoice.totalAmount)
+        val totalInBase = if (rate == 1.0 || invoice.totalAmountInBase <= 0L) toBase(invoice.totalAmount) else invoice.totalAmountInBase
+        var creditInBase = if (rate == 1.0 || invoice.creditAmountInBase <= 0L) toBase(creditAmount) else invoice.creditAmountInBase
+        var cashInBase = if (rate == 1.0 || invoice.cashAmountInBase <= 0L) toBase(invoice.cashAmount) else invoice.cashAmountInBase
+        var posInBase = if (rate == 1.0 || invoice.posAmountInBase <= 0L) toBase(invoice.posAmount) else invoice.posAmountInBase
+        var chequeInBase = if (rate == 1.0 || invoice.chequeAmountInBase <= 0L) toBase(invoice.chequeAmount) else invoice.chequeAmountInBase
 
-        // توازن دقیق ریاضی مجموع اجزای پرداخت با مبلغ کل فاکتور در ارز پایه
+        // در صورتی که مبلغ کل از مجموع پرداختی نقدی/بانکی/چک بیشتر باشد و نسیه صفر باشد، مانده تسویه‌نشده خودکار نسیه است
+        val immediatePaidInBase = cashInBase + posInBase + chequeInBase
+        if (creditInBase == 0L && immediatePaidInBase < totalInBase) {
+            creditInBase = totalInBase - immediatePaidInBase
+        }
+
+        // توازن دقیق ریاضی مجموع اجزای پرداخت با مبلغ کل فاکتور در ارز پایه (رفع خطای گردکردن تسعیر)
         val paymentSum = cashInBase + posInBase + chequeInBase + creditInBase
         val roundingDiff = totalInBase - paymentSum
         if (roundingDiff != 0L) {
@@ -132,7 +143,7 @@ class InvoiceRepository(
                 posInBase > 0 -> posInBase += roundingDiff
                 cashInBase > 0 -> cashInBase += roundingDiff
                 chequeInBase > 0 -> chequeInBase += roundingDiff
-                else -> cashInBase += roundingDiff
+                else -> creditInBase += roundingDiff
             }
         }
 
@@ -187,7 +198,16 @@ class InvoiceRepository(
             )
         }
 
-        // 4. صدور خودکار سند دوبل حسابداری متناسب با نوع فاکتور در ارز پایه
+        // 4. ثبت چک صیادی در خزانه‌داری در صورت وجود در همان تراکنش واحد
+        if (cheque != null && invoice.chequeAmount > 0) {
+            try {
+                treasuryDao.insertCheque(cheque.copy(amount = invoice.chequeAmount))
+            } catch (e: Exception) {
+                android.util.Log.e("InvoiceRepository", "Error inserting cheque in invoice effects", e)
+            }
+        }
+
+        // 5. صدور خودکار سند دوبل حسابداری متناسب با نوع فاکتور در ارز پایه
         val journalItems = mutableListOf<JournalItemEntity>()
 
         when (invoice.invoiceType) {
@@ -430,10 +450,29 @@ class InvoiceRepository(
                 .setScale(0, java.math.RoundingMode.HALF_UP)
                 .toLong()
         }
-        val creditAmount = if (invoice.paymentType == "CREDIT") invoice.totalAmount else invoice.creditAmount
-        val creditInBase = if (invoice.creditAmountInBase > 0) invoice.creditAmountInBase else toBase(creditAmount)
-        val cashInBase = if (invoice.cashAmountInBase > 0) invoice.cashAmountInBase else toBase(invoice.cashAmount)
-        val posInBase = if (invoice.posAmountInBase > 0) invoice.posAmountInBase else toBase(invoice.posAmount)
+        val toBaseCredit = if (invoice.paymentType == "CREDIT") invoice.totalAmount else invoice.creditAmount
+        val totalInBase = if (rate == 1.0 || invoice.totalAmountInBase <= 0L) toBase(invoice.totalAmount) else invoice.totalAmountInBase
+        var creditInBase = if (rate == 1.0 || invoice.creditAmountInBase <= 0L) toBase(toBaseCredit) else invoice.creditAmountInBase
+        var cashInBase = if (rate == 1.0 || invoice.cashAmountInBase <= 0L) toBase(invoice.cashAmount) else invoice.cashAmountInBase
+        var posInBase = if (rate == 1.0 || invoice.posAmountInBase <= 0L) toBase(invoice.posAmount) else invoice.posAmountInBase
+        var chequeInBase = if (rate == 1.0 || invoice.chequeAmountInBase <= 0L) toBase(invoice.chequeAmount) else invoice.chequeAmountInBase
+
+        val immediatePaidInBase = cashInBase + posInBase + chequeInBase
+        if (creditInBase == 0L && immediatePaidInBase < totalInBase) {
+            creditInBase = totalInBase - immediatePaidInBase
+        }
+
+        val paymentSum = cashInBase + posInBase + chequeInBase + creditInBase
+        val roundingDiff = totalInBase - paymentSum
+        if (roundingDiff != 0L) {
+            when {
+                creditInBase > 0 -> creditInBase += roundingDiff
+                posInBase > 0 -> posInBase += roundingDiff
+                cashInBase > 0 -> cashInBase += roundingDiff
+                chequeInBase > 0 -> chequeInBase += roundingDiff
+                else -> creditInBase += roundingDiff
+            }
+        }
 
         try {
             if (invoice.partyId != null && creditInBase > 0) {
@@ -489,7 +528,14 @@ class InvoiceRepository(
             android.util.Log.e("InvoiceRepository", "Error reversing treasury balance", e)
         }
 
-        // 4. ثبت سند معکوس در حسابداری
+        // 4. حذف چک‌های صیادی مربوط به این فاکتور
+        try {
+            treasuryDao.deleteChequesByInvoiceNumber(invoice.invoiceNumber)
+        } catch (e: Exception) {
+            android.util.Log.e("InvoiceRepository", "Error deleting cheques in rollback", e)
+        }
+
+        // 5. ثبت سند معکوس در حسابداری
         try {
             val totalInBase = if (invoice.totalAmountInBase > 0) invoice.totalAmountInBase else toBase(invoice.totalAmount)
             val chequeInBase = if (invoice.chequeAmountInBase > 0) invoice.chequeAmountInBase else toBase(invoice.chequeAmount)
@@ -652,7 +698,8 @@ class InvoiceRepository(
     suspend fun updateExistingInvoice(
         invoiceId: Long,
         updatedInvoice: InvoiceEntity,
-        newItems: List<InvoiceItemEntity>
+        newItems: List<InvoiceItemEntity>,
+        cheque: com.example.data.model.ChequeEntity? = null
     ): Boolean = runInTransaction {
         try {
             val oldInvoiceWithItems = invoiceDao.getInvoiceWithItemsById(invoiceId) ?: return@runInTransaction false
@@ -661,6 +708,13 @@ class InvoiceRepository(
             // اگر فاکتور قبلاً قطعی بود، اثرات گذشته را برگشت می‌زنیم
             if (oldInvoice.status == "FINAL") {
                 rollbackInvoiceEffects(oldInvoice, oldInvoiceWithItems.items)
+            }
+
+            // حذف قطعی چک‌های قبلی این فاکتور جهت جلوگیری از تکرار چک
+            try {
+                treasuryDao.deleteChequesByInvoiceNumber(oldInvoice.invoiceNumber)
+            } catch (e: Exception) {
+                android.util.Log.e("InvoiceRepository", "Error clearing existing cheques on update", e)
             }
 
             // ثبت اطلاعات جدید فاکتور
@@ -672,7 +726,7 @@ class InvoiceRepository(
 
             // اعمال مجدد اثرات فاکتور در صورتی که قطعی باشد
             if (readyInvoice.status == "FINAL") {
-                applyInvoiceEffects(readyInvoice, attachedItems)
+                applyInvoiceEffects(readyInvoice, attachedItems, cheque)
             }
             true
         } catch (e: Exception) {
@@ -741,6 +795,13 @@ class InvoiceRepository(
                 inventoryDao.deleteMovementsByReference("REV-${invoice.invoiceNumber}")
             } catch (e: Exception) {
                 android.util.Log.e("InvoiceRepository", "Error cleaning kardex movements for deleted invoice ${invoice.invoiceNumber}", e)
+            }
+
+            // پاکسازی چک‌های ثبت‌شده برای این فاکتور
+            try {
+                treasuryDao.deleteChequesByInvoiceNumber(invoice.invoiceNumber)
+            } catch (e: Exception) {
+                android.util.Log.e("InvoiceRepository", "Error cleaning cheques for deleted invoice ${invoice.invoiceNumber}", e)
             }
 
             // ۳. حذف ردیف‌های اقلام فاکتور ابتدا تا نقض کلید خارجی در دیتابیس رخ ندهد

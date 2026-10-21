@@ -3,6 +3,9 @@ package com.example
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.database.AppDatabase
+import com.example.data.model.BankAccountEntity
+import com.example.data.model.CashDeskEntity
+import com.example.data.model.ChequeEntity
 import com.example.data.model.InvoiceEntity
 import com.example.data.model.InvoiceItemEntity
 import com.example.data.model.PartyEntity
@@ -284,5 +287,317 @@ class InvoiceTypesIntegrationTest {
         // بررسی تراز اسناد دوبل حسابداری
         val maxVoucher = db.accountingDao().getMaxVoucherNumber()
         assertTrue("باید حداقل ۴ سند حسابداری برای ۴ عملیات صادر شده باشد", maxVoucher >= 4)
+    }
+
+    @Test
+    fun testMixedSettlementAndAtomicChequeAcrossTypes() = runBlocking {
+        val todayStr = JalaliDate.now().toStandardString()
+
+        // آماده‌سازی صندوق و بانک
+        val cashDeskId = db.treasuryDao().insertCashDesk(
+            CashDeskEntity(id = 10L, code = "CSH-10", name = "صندوق مرکزی فروشگاه", currentBalance = 1000000L)
+        )
+        val bankAccountId = db.treasuryDao().insertBankAccount(
+            BankAccountEntity(id = 20L, bankName = "ملت", accountNumber = "12345", cardNumber = "6104", currentBalance = 5000000L)
+        )
+
+        val prodId = db.inventoryDao().insertProduct(
+            ProductEntity(
+                code = "PRD-MIX-01",
+                name = "کالای تسویه ترکیبی",
+                barcode = "11223344",
+                category = "آزمایشی",
+                primaryUnit = "بسته",
+                secondaryUnit = "عدد",
+                conversionRate = 1.0,
+                buyPrice = 80000L,
+                wholesalePrice = 90000L,
+                retailPrice = 100000L,
+                currentStockInSecondary = 200.0,
+                minStockThreshold = 10.0
+            )
+        )
+
+        val partyCustomer = db.partyDao().insertParty(
+            PartyEntity(code = "CUST-MIX", name = "مشتری ترکیبی", partyType = "CUSTOMER", mobile = "09120000001", creditLimit = 50000000L, currentBalance = 0L)
+        )
+
+        // ۱. فاکتور فروش ترکیبی:
+        // اقلام: ۱۰ عدد × ۱۰۰,۰۰۰ = ۱,۰۰۰,۰۰۰ تومان
+        // تخفیف: ۱۰۰,۰۰۰ تومان
+        // مشمول مالیات: ۹۰۰,۰۰۰ تومان
+        // مالیات ۱۰٪: ۹۰,۰۰۰ تومان
+        // هزینه حمل (مستقیم): ۱۰,۰۰۰ تومان
+        // جمع کل فاکتور: ۱,۰۰۰,۰۰۰ تومان
+        // تسویه ترکیبی: نقد ۲۰۰,۰۰۰، پوز ۳۰۰,۰۰۰، چک ۴۰۰,۰۰۰، نسیه ۱۰۰,۰۰۰
+        val saleInvoice = InvoiceEntity(
+            invoiceNumber = "SALE-MIX-901",
+            invoiceType = "SALE",
+            jalaliDate = todayStr,
+            partyId = partyCustomer,
+            partyName = "مشتری ترکیبی",
+            warehouseId = 1L,
+            warehouseName = "انبار مرکزی",
+            subtotalAmount = 1000000L,
+            discountAmount = 100000L,
+            taxAmount = 90000L,
+            directExpenseAmount = 10000L,
+            directExpenseType = "FREIGHT",
+            totalAmount = 1000000L,
+            paymentType = "MIXED",
+            cashAmount = 200000L,
+            posAmount = 300000L,
+            chequeAmount = 400000L,
+            creditAmount = 100000L,
+            cashDeskId = cashDeskId,
+            bankAccountId = bankAccountId,
+            status = "FINAL"
+        )
+        val saleItem = InvoiceItemEntity(
+            invoiceId = 0L,
+            productId = prodId,
+            productName = "کالای تسویه ترکیبی",
+            unitName = "عدد",
+            isPrimaryUnit = true,
+            quantity = 10.0,
+            conversionRate = 1.0,
+            quantityInSecondary = 10.0,
+            unitPrice = 100000L,
+            totalPrice = 1000000L
+        )
+        val chequeSale = ChequeEntity(
+            chequeNumber = "CHK-9901",
+            sayadNumber = "1234567890123456",
+            type = "RECEIVABLE",
+            partyId = partyCustomer,
+            partyName = "مشتری ترکیبی",
+            bankName = "بانک صادرات",
+            branch = "مرکزی",
+            amount = 400000L,
+            issueDateJalali = todayStr,
+            dueDateJalali = "1405/03/01",
+            dueDateEpochMillis = System.currentTimeMillis() + 86400000L * 60,
+            status = "NORMAL",
+            notes = "دریافت چک صیادی بابت فاکتور SALE-MIX-901"
+        )
+
+        val invId = invoiceRepo.createInvoice(saleInvoice, listOf(saleItem), chequeSale)
+        assertTrue("شناسه فاکتور معتبر باشد", invId > 0)
+
+        // بررسی موجودی انبار: ۲۰۰ - ۱۰ = ۱۹۰
+        val prodAfter = db.inventoryDao().getProductById(prodId)
+        assertEquals(190.0, prodAfter!!.currentStockInSecondary, 0.01)
+
+        // بررسی مانده بدهی مشتری: ۱۰۰,۰۰۰ تومان بدهکار
+        val customerAfter = db.partyDao().getPartyById(partyCustomer)
+        assertEquals(100000L, customerAfter!!.currentBalance)
+
+        // بررسی ثبت چک در خزانه‌داری
+        val savedCheque = db.treasuryDao().getChequeByInvoiceNumber("SALE-MIX-901")
+        assertNotNull("چک صیادی باید در خزانه‌داری ذخیره شده باشد", savedCheque)
+        assertEquals("CHK-9901", savedCheque!!.chequeNumber)
+        assertEquals("RECEIVABLE", savedCheque.type)
+        assertEquals(400000L, savedCheque.amount)
+
+        // بررسی تراز بودن سند حسابداری صادر شده
+        val lastVoucherId = db.accountingDao().getMaxVoucherNumber()
+        val journalItems = db.accountingDao().getJournalItemsByVoucherSync(lastVoucherId)
+        val sumDebit = journalItems.sumOf { it.debit }
+        val sumCredit = journalItems.sumOf { it.credit }
+        assertEquals("تراز بدهکار و بستانکار سند دوبل فروش باید کاملاً برابر باشند", sumDebit, sumCredit)
+    }
+
+    @Test
+    fun testInvoiceEditRollbackAndAtomicReapply() = runBlocking {
+        val todayStr = JalaliDate.now().toStandardString()
+
+        val prodId = db.inventoryDao().insertProduct(
+            ProductEntity(
+                code = "PRD-EDIT-01",
+                name = "کالای آزمون ویرایش",
+                barcode = "55667788",
+                category = "آزمایشی",
+                primaryUnit = "عدد",
+                secondaryUnit = "عدد",
+                conversionRate = 1.0,
+                buyPrice = 10000L,
+                wholesalePrice = 15000L,
+                retailPrice = 20000L,
+                currentStockInSecondary = 50.0,
+                minStockThreshold = 5.0
+            )
+        )
+
+        val partyCustomer = db.partyDao().insertParty(
+            PartyEntity(code = "CUST-EDIT", name = "مشتری آزمون ویرایش", partyType = "CUSTOMER", mobile = "09120000002", creditLimit = 50000000L, currentBalance = 0L)
+        )
+
+        // ایجاد اولیه فاکتور فروش: ۱۰ عدد به قیمت ۲۰۰,۰۰۰ تومان، پرداخت نقدی
+        val initialInvoice = InvoiceEntity(
+            invoiceNumber = "SALE-EDIT-01",
+            invoiceType = "SALE",
+            jalaliDate = todayStr,
+            partyId = partyCustomer,
+            partyName = "مشتری آزمون ویرایش",
+            warehouseId = 1L,
+            warehouseName = "انبار مرکزی",
+            subtotalAmount = 200000L,
+            totalAmount = 200000L,
+            paymentType = "CASH",
+            cashAmount = 200000L,
+            status = "FINAL"
+        )
+        val initialItem = InvoiceItemEntity(
+            invoiceId = 0L,
+            productId = prodId,
+            productName = "کالای آزمون ویرایش",
+            unitName = "عدد",
+            isPrimaryUnit = true,
+            quantity = 10.0,
+            conversionRate = 1.0,
+            quantityInSecondary = 10.0,
+            unitPrice = 20000L,
+            totalPrice = 200000L
+        )
+
+        val invId = invoiceRepo.createInvoice(initialInvoice, listOf(initialItem))
+        assertEquals(40.0, db.inventoryDao().getProductById(prodId)!!.currentStockInSecondary, 0.01)
+
+        // اکنون ویرایش فاکتور: تغییر تعداد به ۳۰ عدد نسیه
+        val updatedInvoice = initialInvoice.copy(
+            id = invId,
+            subtotalAmount = 600000L,
+            totalAmount = 600000L,
+            paymentType = "CREDIT",
+            cashAmount = 0L,
+            creditAmount = 600000L
+        )
+        val updatedItem = initialItem.copy(
+            quantity = 30.0,
+            quantityInSecondary = 30.0,
+            totalPrice = 600000L
+        )
+
+        val editResult = invoiceRepo.updateExistingInvoice(invId, updatedInvoice, listOf(updatedItem))
+        assertTrue("ویرایش باید با موفقیت انجام شود", editResult)
+
+        // بررسی موجودی انبار: ابتدا ۱۰ عدد قبلی بازگشت داده شده (۴۰ + ۱۰ = ۵۰)، سپس ۳۰ عدد جدید کسر شده (۵۰ - ۳۰ = ۲۰)
+        val prodAfterEdit = db.inventoryDao().getProductById(prodId)
+        assertEquals("موجودی پس از ویرایش باید دقیقاً ۲۰ باشد", 20.0, prodAfterEdit!!.currentStockInSecondary, 0.01)
+
+        // بررسی مانده طرف‌حساب: ۶۰۰,۰۰۰ تومان بدهکار
+        val custAfterEdit = db.partyDao().getPartyById(partyCustomer)
+        assertEquals(600000L, custAfterEdit!!.currentBalance)
+
+        // بررسی بازیابی فاکتور و اقلام از دیتابیس (Reloading verification)
+        val loaded = db.invoiceDao().getInvoiceWithItemsById(invId)
+        assertNotNull(loaded)
+        assertEquals(600000L, loaded!!.invoice.totalAmount)
+        assertEquals(1, loaded.items.size)
+        assertEquals(30.0, loaded.items[0].quantity, 0.01)
+    }
+
+    @Test
+    fun testInvoiceVoidRollback() = runBlocking {
+        val todayStr = JalaliDate.now().toStandardString()
+
+        val prodId = db.inventoryDao().insertProduct(
+            ProductEntity(
+                code = "PRD-VOID-01",
+                name = "کالای آزمون ابطال",
+                barcode = "99001122",
+                category = "عمومی",
+                primaryUnit = "عدد",
+                secondaryUnit = "عدد",
+                conversionRate = 1.0,
+                buyPrice = 50000L,
+                wholesalePrice = 60000L,
+                retailPrice = 70000L,
+                currentStockInSecondary = 100.0,
+                minStockThreshold = 5.0
+            )
+        )
+
+        val supplierId = db.partyDao().insertParty(
+            PartyEntity(code = "SUPP-VOID", name = "تأمین‌کننده آزمون ابطال", partyType = "SUPPLIER", mobile = "09120000003", currentBalance = 0L)
+        )
+
+        // خرید نسیه ۵۰ عدد از تأمین‌کننده
+        val purchaseInvoice = InvoiceEntity(
+            invoiceNumber = "PUR-VOID-01",
+            invoiceType = "PURCHASE",
+            jalaliDate = todayStr,
+            partyId = supplierId,
+            partyName = "تأمین‌کننده آزمون ابطال",
+            warehouseId = 1L,
+            warehouseName = "انبار مرکزی",
+            subtotalAmount = 2500000L,
+            totalAmount = 2500000L,
+            paymentType = "CREDIT",
+            creditAmount = 2500000L,
+            status = "FINAL"
+        )
+        val purchaseItem = InvoiceItemEntity(
+            invoiceId = 0L,
+            productId = prodId,
+            productName = "کالای آزمون ابطال",
+            unitName = "عدد",
+            isPrimaryUnit = true,
+            quantity = 50.0,
+            conversionRate = 1.0,
+            quantityInSecondary = 50.0,
+            unitPrice = 50000L,
+            totalPrice = 2500000L
+        )
+
+        val invId = invoiceRepo.createInvoice(purchaseInvoice, listOf(purchaseItem))
+        assertEquals(150.0, db.inventoryDao().getProductById(prodId)!!.currentStockInSecondary, 0.01)
+        assertEquals(-2500000L, db.partyDao().getPartyById(supplierId)!!.currentBalance)
+
+        // ابطال کامل فاکتور
+        val voidResult = invoiceRepo.voidInvoice(invId)
+        assertTrue(voidResult)
+
+        // بررسی بازگشت وضعیت موجودی انبار به حالت قبل (۱۵۰ - ۵۰ = ۱۰۰)
+        val prodAfterVoid = db.inventoryDao().getProductById(prodId)
+        assertEquals("موجودی کالا باید پس از ابطال دقیقاً به مقدار اولیه ۱۰۰ بازگردد", 100.0, prodAfterVoid!!.currentStockInSecondary, 0.01)
+
+        // بررسی بازگشت مانده بدهی تأمین‌کننده به ۰
+        val suppAfterVoid = db.partyDao().getPartyById(supplierId)
+        assertEquals("مانده حساب تأمین‌کننده پس از ابطال باید صفر شود", 0L, suppAfterVoid!!.currentBalance)
+
+        // وضعیت فاکتور باید VOID شده باشد
+        val loaded = db.invoiceDao().getInvoiceWithItemsById(invId)
+        assertEquals("VOID", loaded!!.invoice.status)
+    }
+
+    @Test
+    fun testCalculationFormulasAndBounds() {
+        val subtotal = 500000L
+
+        // ۱. تخفیف بیش از سرجمع باید محدود به سقف subtotal شود
+        val excessiveDiscount = 700000L
+        val effectiveDiscount = minOf(maxOf(0L, excessiveDiscount), subtotal)
+        assertEquals("تخفیف نمی‌تواند از جمع ناخالص بیشتر باشد", subtotal, effectiveDiscount)
+
+        val taxable = subtotal - effectiveDiscount
+        assertEquals(0L, taxable)
+
+        // ۲. مالیات بر ارزش افزوده نباید روی مبلغ منفی محاسبه شود
+        val tax = Math.round(taxable * 0.10)
+        assertEquals(0L, tax)
+
+        // ۳. هزینه مستقیم باید بدون مالیات مضاعف به جمع نهایی اضافه شود
+        val directExpense = 35000L
+        val grandTotal = taxable + tax + directExpense
+        assertEquals(35000L, grandTotal)
+
+        // ۴. تسویه عادی: تخفیف مجاز
+        val normalDiscount = 50000L
+        val effectiveDiscountNormal = minOf(maxOf(0L, normalDiscount), subtotal)
+        val taxableNormal = subtotal - effectiveDiscountNormal // 450,000
+        val taxNormal = Math.round(taxableNormal * 0.10) // 45,000
+        val grandTotalNormal = taxableNormal + taxNormal + directExpense // 450,000 + 45,000 + 35,000 = 530,000
+        assertEquals(530000L, grandTotalNormal)
     }
 }
