@@ -104,7 +104,14 @@ interface AccountingDao {
     """)
     fun getActiveJournalItems(): Flow<List<JournalItemEntity>>
 
-    @Query("SELECT * FROM journal_items WHERE partyId = :partyId ORDER BY id ASC")
+    @Query("""
+        SELECT ji.* FROM journal_items ji
+        INNER JOIN journal_entries je ON ji.voucherId = je.id
+        WHERE ji.partyId = :partyId 
+          AND je.status != 'VOID'
+          AND ji.generalCode IN (102, 301)
+        ORDER BY je.id ASC, ji.id ASC
+    """)
     fun getJournalItemsByParty(partyId: Long): Flow<List<JournalItemEntity>>
 
     @androidx.room.Update

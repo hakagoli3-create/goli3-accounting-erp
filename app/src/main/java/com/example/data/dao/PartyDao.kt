@@ -64,12 +64,21 @@ interface PartyDao {
     fun getTotalPayables(): Flow<Long>
 
     @Query("""
+        UPDATE journal_items 
+        SET partyId = NULL 
+        WHERE generalCode NOT IN (102, 301) AND partyId IS NOT NULL
+    """)
+    suspend fun sanitizePartyJournalItems()
+
+    @Query("""
         UPDATE parties 
         SET currentBalance = (
             SELECT COALESCE(SUM(ji.debit - ji.credit), 0)
             FROM journal_items ji
             INNER JOIN journal_entries je ON ji.voucherId = je.id
-            WHERE ji.partyId = :partyId AND je.status != 'VOID'
+            WHERE ji.partyId = :partyId 
+              AND je.status != 'VOID'
+              AND ji.generalCode IN (102, 301)
         )
         WHERE id = :partyId
     """)
@@ -81,7 +90,9 @@ interface PartyDao {
             SELECT COALESCE(SUM(ji.debit - ji.credit), 0)
             FROM journal_items ji
             INNER JOIN journal_entries je ON ji.voucherId = je.id
-            WHERE ji.partyId = parties.id AND je.status != 'VOID'
+            WHERE ji.partyId = parties.id 
+              AND je.status != 'VOID'
+              AND ji.generalCode IN (102, 301)
         )
     """)
     suspend fun recalculateAllPartyBalances()

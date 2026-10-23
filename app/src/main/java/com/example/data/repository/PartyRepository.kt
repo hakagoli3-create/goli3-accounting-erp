@@ -33,9 +33,15 @@ class PartyRepository(val dao: PartyDao) {
     suspend fun updatePartyBalance(partyId: Long, delta: Long) =
         dao.updatePartyBalance(partyId, delta)
 
-    suspend fun recalculatePartyBalance(partyId: Long) =
-        dao.recalculatePartyBalance(partyId)
+    suspend fun sanitizePartyJournalItems() = dao.sanitizePartyJournalItems()
 
-    suspend fun recalculateAllPartyBalances() =
+    suspend fun recalculatePartyBalance(partyId: Long) {
+        dao.sanitizePartyJournalItems()
+        dao.recalculatePartyBalance(partyId)
+    }
+
+    suspend fun recalculateAllPartyBalances() {
+        dao.sanitizePartyJournalItems()
         dao.recalculateAllPartyBalances()
+    }
 }

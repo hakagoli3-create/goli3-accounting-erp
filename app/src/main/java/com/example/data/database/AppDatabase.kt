@@ -372,6 +372,16 @@ abstract class AppDatabase : RoomDatabase() {
                         override fun onOpen(db: SupportSQLiteDatabase) {
                             super.onOpen(db)
                             db.execSQL("PRAGMA foreign_keys = ON;")
+                            try {
+                                db.execSQL("UPDATE journal_items SET partyId = NULL WHERE generalCode NOT IN (102, 301) AND partyId IS NOT NULL")
+                            } catch (_: Exception) {}
+                            CoroutineScope(Dispatchers.IO).launch {
+                                try {
+                                    val partyDao = getInstance(context).partyDao()
+                                    partyDao.sanitizePartyJournalItems()
+                                    partyDao.recalculateAllPartyBalances()
+                                } catch (_: Exception) {}
+                            }
                         }
                     })
                     .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)

@@ -112,6 +112,7 @@ fun CrmScreen(
     val allParties by viewModel.allParties.collectAsStateWithLifecycle()
     val totalReceivables by viewModel.totalReceivables.collectAsStateWithLifecycle()
     val totalPayables by viewModel.totalPayables.collectAsStateWithLifecycle()
+    val supplierPayables by viewModel.supplierPayables.collectAsStateWithLifecycle()
 
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val selectedTab by viewModel.selectedTab.collectAsStateWithLifecycle()
@@ -156,7 +157,7 @@ fun CrmScreen(
                 CrmKpiHeader(
                     allParties = allParties,
                     totalReceivables = totalReceivables,
-                    totalPayables = totalPayables
+                    supplierPayables = supplierPayables
                 )
 
                 // Navigation Tabs
@@ -428,10 +429,11 @@ fun CrmScreen(
 private fun CrmKpiHeader(
     allParties: List<PartyEntity>,
     totalReceivables: Long,
-    totalPayables: Long
+    supplierPayables: Long
 ) {
     val overLimitCount = allParties.count { it.isCreditLimitExceeded() }
     val debtorsCount = allParties.count { it.currentBalance > 0 }
+    val creditorsCount = allParties.count { it.currentBalance < 0 && it.partyType in listOf("SUPPLIER", "BOTH") }
 
     Card(
         modifier = Modifier
@@ -462,8 +464,8 @@ private fun CrmKpiHeader(
             // Card 2: Total Payables (بدهی ما به تأمین‌کنندگان)
             CrmKpiPill(
                 title = "بدهی به تأمین‌کنندگان",
-                subtitle = "اسناد و فاکتورهای باز خرید",
-                amount = totalPayables,
+                subtitle = if (creditorsCount > 0) "${NumberFormatUtils.toPersianDigits(creditorsCount)} تأمین‌کننده بستانکار" else "اسناد و فاکتورهای باز خرید",
+                amount = supplierPayables,
                 icon = Icons.Default.TrendingDown,
                 accentColor = AccountingCreditRed,
                 bgColor = AccountingCreditRed.copy(alpha = 0.10f)

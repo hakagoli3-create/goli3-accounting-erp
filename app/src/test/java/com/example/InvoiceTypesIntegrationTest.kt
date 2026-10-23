@@ -13,6 +13,7 @@ import com.example.data.model.ProductEntity
 import com.example.data.repository.InvoiceRepository
 import com.example.util.EscPosPrinterHelper
 import com.example.util.JalaliDate
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Before
@@ -569,6 +570,159 @@ class InvoiceTypesIntegrationTest {
         // وضعیت فاکتور باید VOID شده باشد
         val loaded = db.invoiceDao().getInvoiceWithItemsById(invId)
         assertEquals("VOID", loaded!!.invoice.status)
+    }
+
+    @Test
+    fun testSupplierCreditPurchaseAndCustomerSettlementBalanceIntegrity() = runBlocking {
+        val todayStr = JalaliDate.now().toStandardString()
+
+        // ۱. تعریف تأمین‌کننده «رباطی»
+        val robatiId = db.partyDao().insertParty(
+            PartyEntity(
+                code = "SUPP-ROBATI",
+                name = "رباطی",
+                partyType = "SUPPLIER",
+                creditLimit = 0L,
+                currentBalance = 0L
+            )
+        )
+
+        // ۲. تعریف مشتری
+        val customerId = db.partyDao().insertParty(
+            PartyEntity(
+                code = "CUST-TEST",
+                name = "مشتری نمونه",
+                partyType = "CUSTOMER",
+                creditLimit = 20000000L,
+                currentBalance = 0L
+            )
+        )
+
+        val prodId = db.inventoryDao().insertProduct(
+            ProductEntity(
+                code = "PRD-ROBATI",
+                name = "کالای رباطی",
+                barcode = "11223344",
+                category = "عمومی",
+                primaryUnit = "عدد",
+                secondaryUnit = "عدد",
+                conversionRate = 1.0,
+                buyPrice = 50000L,
+                wholesalePrice = 100000L,
+                retailPrice = 100000L,
+                currentStockInSecondary = 10.0
+            )
+        )
+
+        // ۳. فاکتور خرید ۵۰,۰۰۰ تومان به صورت نسیه از رباطی
+        val purchaseInvoice = InvoiceEntity(
+            invoiceNumber = "خرید-1001",
+            invoiceType = "PURCHASE",
+            jalaliDate = todayStr,
+            partyId = robatiId,
+            partyName = "رباطی",
+            warehouseId = 1L,
+            warehouseName = "انبار مرکزی",
+            subtotalAmount = 50000L,
+            totalAmount = 50000L,
+            paymentType = "CREDIT",
+            creditAmount = 50000L,
+            status = "FINAL"
+        )
+        val purchaseItem = InvoiceItemEntity(
+            invoiceId = 0L,
+            productId = prodId,
+            productName = "کالای رباطی",
+            unitName = "عدد",
+            isPrimaryUnit = false,
+            quantity = 1.0,
+            conversionRate = 1.0,
+            quantityInSecondary = 1.0,
+            unitPrice = 50000L,
+            totalPrice = 50000L
+        )
+        invoiceRepo.createInvoice(purchaseInvoice, listOf(purchaseItem))
+
+        // بررسی اولیه مانده حساب رباطی: بدهی ۵۰,۰۰۰ به تأمین‌کننده (بستانکار / منفی)
+        val robatiAfterPurchase = db.partyDao().getPartyById(robatiId)
+        assertNotNull(robatiAfterPurchase)
+        assertEquals(-50000L, robatiAfterPurchase!!.currentBalance)
+
+        // ۴. فاکتور فروش ۱۰۰,۰۰۰ تومان به صورت نسیه به مشتری
+        val saleInvoice = InvoiceEntity(
+            invoiceNumber = "فاکتور-1002",
+            invoiceType = "SALE",
+            jalaliDate = todayStr,
+            partyId = customerId,
+            partyName = "مشتری نمونه",
+            warehouseId = 1L,
+            warehouseName = "انبار مرکزی",
+            subtotalAmount = 100000L,
+            totalAmount = 100000L,
+            paymentType = "CREDIT",
+            creditAmount = 100000L,
+            status = "FINAL"
+        )
+        val saleItem = InvoiceItemEntity(
+            invoiceId = 0L,
+            productId = prodId,
+            productName = "کالای رباطی",
+            unitName = "عدد",
+            isPrimaryUnit = false,
+            quantity = 1.0,
+            conversionRate = 1.0,
+            quantityInSecondary = 1.0,
+            unitPrice = 100000L,
+            totalPrice = 100000L
+        )
+        invoiceRepo.createInvoice(saleInvoice, listOf(saleItem))
+
+        val custAfterSale = db.partyDao().getPartyById(customerId)
+        assertNotNull(custAfterSale)
+        assertEquals(100000L, custAfterSale!!.currentBalance)
+
+        // ۵. ثبت دریافت وجه از مشتری به مبلغ ۱۰۰,۰۰۰ تومان در خزانه‌داری
+        val treasuryRepo = com.example.data.repository.TreasuryRepository(db.treasuryDao(), db)
+        val accountingRepo = com.example.data.repository.AccountingRepository(db.accountingDao(), db)
+        val expenseRepo = com.example.data.repository.ExpenseAndIncomeRepository(db.expenseAndIncomeDao(), db.treasuryDao(), db.accountingDao(), db)
+        val partyRepo = com.example.data.repository.PartyRepository(db.partyDao())
+
+        val treasuryViewModel = com.example.ui.viewmodel.TreasuryViewModel(
+            treasuryRepo, accountingRepo, expenseRepo, partyRepo
+        )
+
+        treasuryViewModel.registerCashReceipt(
+            isPartyReceipt = true,
+            partyId = customerId,
+            partyName = "مشتری نمونه",
+            incomeCategoryId = null,
+            incomeCategoryTitle = "",
+            title = "تسویه بدهی مشتری",
+            amount = 100000L,
+            destinationType = "CASH",
+            targetId = 1L,
+            jalaliDate = todayStr,
+            onSuccess = {}
+        )
+
+        // کمی صبر برای تکمیل تراکنش‌های ناهمگام خزانه‌داری و محاسبه مجدد
+        kotlinx.coroutines.delay(200)
+
+        // ۶. بررسی دقیق و قطعی مانده حساب‌ها پس از تسویه مشتری
+        val robatiFinal = db.partyDao().getPartyById(robatiId)
+        assertNotNull(robatiFinal)
+        assertEquals("مانده حساب رباطی پس از دریافت از مشتری باید همچنان دقیقاً بدهی ۵۰,۰۰۰ تومان (منفی ۵۰۰۰۰) باقی بماند", -50000L, robatiFinal!!.currentBalance)
+
+        val customerFinal = db.partyDao().getPartyById(customerId)
+        assertNotNull(customerFinal)
+        assertEquals("مانده حساب مشتری پس از پرداخت کامل باید دقیقاً صفر (تسویه) شود", 0L, customerFinal!!.currentBalance)
+
+        // بررسی مقادیر سرجمع KPI
+        val supplierPayables = db.partyDao().getSupplierPayables().first()
+        assertEquals("بدهی به تأمین‌کنندگان در هدر CRM باید دقیقاً ۵۰,۰۰۰ تومان باشد", 50000L, supplierPayables)
+
+        val totalReceivables = db.partyDao().getTotalReceivables().first()
+        assertEquals("کل مطالبات از مشتریان پس از تسویه باید صفر تومان باشد", 0L, totalReceivables)
     }
 
     @Test

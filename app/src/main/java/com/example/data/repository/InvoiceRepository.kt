@@ -326,10 +326,10 @@ class InvoiceRepository(
                         )
                     )
                 }
-                // بستانکار: فروش کالا و خدمات
+                // بستانکار: فروش کالا و خدمات (درآمد موسسه، بدون انتساب به حساب تفصیلی شخص)
                 journalItems.add(
                     JournalItemEntity(
-                        voucherId = 0L, generalCode = 601, subsidiaryCode = 60101, partyId = invoice.partyId,
+                        voucherId = 0L, generalCode = 601, subsidiaryCode = 60101, partyId = null,
                         description = "درآمد حاصل از فروش کالا - فاکتور ${invoice.invoiceNumber}$currencyNote", debit = 0L, credit = totalInBase
                     )
                 )
@@ -360,10 +360,10 @@ class InvoiceRepository(
                 }
             }
             "PURCHASE" -> {
-                // بدهکار: خرید کالا و انبار
+                // بدهکار: خرید کالا و انبار (حساب دارایی انبار، بدون انتساب به حساب تفصیلی شخص)
                 journalItems.add(
                     JournalItemEntity(
-                        voucherId = 0L, generalCode = 103, subsidiaryCode = 10301, partyId = invoice.partyId,
+                        voucherId = 0L, generalCode = 103, subsidiaryCode = 10301, partyId = null,
                         description = "خرید کالا از ${invoice.partyName} - فاکتور خرید ${invoice.invoiceNumber}$currencyNote", debit = totalInBase, credit = 0L
                     )
                 )
@@ -402,10 +402,10 @@ class InvoiceRepository(
                 }
             }
             "RETURN_SALE" -> {
-                // برگشت از فروش: بدهکار شدن حساب برگشت از فروش
+                // برگشت از فروش: بدهکار شدن حساب برگشت از فروش (بدون انتساب به تفصیلی شخص)
                 journalItems.add(
                     JournalItemEntity(
-                        voucherId = 0L, generalCode = 601, subsidiaryCode = 60102, partyId = invoice.partyId,
+                        voucherId = 0L, generalCode = 601, subsidiaryCode = 60102, partyId = null,
                         description = "برگشت کالا از فروش مشتری ${invoice.partyName} - فاکتور ${invoice.invoiceNumber}$currencyNote", debit = totalInBase, credit = 0L
                     )
                 )
@@ -502,10 +502,10 @@ class InvoiceRepository(
                         )
                     )
                 }
-                // بستانکار: برگشت از خرید
+                // بستانکار: برگشت از خرید (بدون انتساب به تفصیلی شخص)
                 journalItems.add(
                     JournalItemEntity(
-                        voucherId = 0L, generalCode = 103, subsidiaryCode = 10302, partyId = invoice.partyId,
+                        voucherId = 0L, generalCode = 103, subsidiaryCode = 10302, partyId = null,
                         description = "برگشت از خرید به تأمین‌کننده ${invoice.partyName} - فاکتور ${invoice.invoiceNumber}$currencyNote", debit = 0L, credit = totalInBase
                     )
                 )
@@ -526,6 +526,16 @@ class InvoiceRepository(
                 ),
                 journalItems
             )
+        }
+
+        // به روزرسانی و محاسبه مجدد دقیق مانده حساب طرف‌حساب از روی اسناد رسمی فعال
+        try {
+            if (invoice.partyId != null) {
+                partyDao.recalculatePartyBalance(invoice.partyId)
+            }
+            partyDao.recalculateAllPartyBalances()
+        } catch (e: Exception) {
+            android.util.Log.e("InvoiceRepository", "Error recalculating party balances after applyInvoiceEffects", e)
         }
     }
 
@@ -670,7 +680,7 @@ class InvoiceRepository(
                 "SALE", "POS_SALE" -> {
                     rollbackItems.add(
                         JournalItemEntity(
-                            voucherId = 0L, generalCode = 601, subsidiaryCode = 60101, partyId = invoice.partyId,
+                            voucherId = 0L, generalCode = 601, subsidiaryCode = 60101, partyId = null,
                             description = "ابطال درآمد فروش - فاکتور ${invoice.invoiceNumber}", debit = totalInBase, credit = 0L
                         )
                     )
@@ -751,7 +761,7 @@ class InvoiceRepository(
                     )
                     rollbackItems.add(
                         JournalItemEntity(
-                            voucherId = 0L, generalCode = 103, subsidiaryCode = 10301, partyId = invoice.partyId,
+                            voucherId = 0L, generalCode = 103, subsidiaryCode = 10301, partyId = null,
                             description = "ابطال ورود کالا/خرید - فاکتور ${invoice.invoiceNumber}", debit = 0L, credit = totalInBase
                         )
                     )
@@ -783,7 +793,7 @@ class InvoiceRepository(
                     )
                     rollbackItems.add(
                         JournalItemEntity(
-                            voucherId = 0L, generalCode = 601, subsidiaryCode = 60102, partyId = invoice.partyId,
+                            voucherId = 0L, generalCode = 601, subsidiaryCode = 60102, partyId = null,
                             description = "ابطال مرجوعی فروش ${invoice.invoiceNumber}", debit = 0L, credit = totalInBase
                         )
                     )
@@ -816,7 +826,7 @@ class InvoiceRepository(
                 "RETURN_PURCHASE" -> {
                     rollbackItems.add(
                         JournalItemEntity(
-                            voucherId = 0L, generalCode = 103, subsidiaryCode = 10302, partyId = invoice.partyId,
+                            voucherId = 0L, generalCode = 103, subsidiaryCode = 10302, partyId = null,
                             description = "ابطال مرجوعی خرید ${invoice.invoiceNumber}", debit = totalInBase, credit = 0L
                         )
                     )
@@ -861,6 +871,16 @@ class InvoiceRepository(
                     ),
                     rollbackItems
                 )
+            }
+
+            // به روزرسانی و محاسبه مجدد دقیق مانده حساب طرف‌حساب
+            try {
+                if (invoice.partyId != null) {
+                    partyDao.recalculatePartyBalance(invoice.partyId)
+                }
+                partyDao.recalculateAllPartyBalances()
+            } catch (e: Exception) {
+                android.util.Log.e("InvoiceRepository", "Error recalculating party balances after rollbackInvoiceEffects", e)
             }
         } catch (e: Exception) {
             android.util.Log.e("InvoiceRepository", "Error creating rollback accounting voucher", e)

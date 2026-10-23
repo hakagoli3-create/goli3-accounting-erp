@@ -36,6 +36,18 @@ class PartyViewModel(
     val totalPayables: StateFlow<Long> = partyRepository.totalPayables
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
 
+    val customerReceivables: StateFlow<Long> = partyRepository.customerReceivables
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+
+    val supplierPayables: StateFlow<Long> = partyRepository.supplierPayables
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+
+    init {
+        viewModelScope.launch {
+            partyRepository.recalculateAllPartyBalances()
+        }
+    }
+
     val filteredParties: StateFlow<List<PartyEntity>> = combine(
         partyRepository.allParties,
         _searchQuery,
