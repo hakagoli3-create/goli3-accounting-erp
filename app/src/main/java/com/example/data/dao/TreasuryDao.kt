@@ -115,6 +115,14 @@ interface TreasuryDao {
     @Query("SELECT * FROM treasury_currency_balances ORDER BY currencyCode ASC")
     fun getAllCurrencyBalances(): Flow<List<com.example.data.model.TreasuryCurrencyBalanceEntity>>
 
+    @Query("""
+        SELECT currencyCode AS currencyType, 
+               COALESCE(SUM(balance), 0.0) AS totalAmount
+        FROM treasury_currency_balances
+        GROUP BY currencyCode
+    """)
+    fun observeTotalAssetsByCurrency(): Flow<List<com.example.data.model.CurrencyAssetDto>>
+
     @Query("SELECT * FROM treasury_currency_balances WHERE accountType = :accountType AND accountId = :accountId")
     fun getBalancesForAccount(accountType: String, accountId: Long): Flow<List<com.example.data.model.TreasuryCurrencyBalanceEntity>>
 

@@ -148,6 +148,7 @@ class TreasuryRepository(
 
     // Multi-Currency Balances
     val allCurrencyBalances: Flow<List<com.example.data.model.TreasuryCurrencyBalanceEntity>> = dao.getAllCurrencyBalances()
+    val totalAssetsByCurrency: Flow<List<com.example.data.model.CurrencyAssetDto>> = dao.observeTotalAssetsByCurrency()
 
     fun getBalancesForAccount(accountType: String, accountId: Long): Flow<List<com.example.data.model.TreasuryCurrencyBalanceEntity>> =
         dao.getBalancesForAccount(accountType, accountId)

@@ -93,6 +93,15 @@ interface AccountingDao {
     @Query("SELECT SUM(credit) FROM journal_items")
     fun getTotalCreditSum(): Flow<Long?>
 
+    @Query("""
+        SELECT 'تومان' AS currencyType,
+               CAST(COALESCE(SUM(ji.debit - ji.credit), 0) AS REAL) AS totalAmount
+        FROM journal_items ji
+        INNER JOIN journal_entries je ON ji.voucherId = je.id
+        WHERE je.status != 'VOID' AND (ji.generalCode BETWEEN 100 AND 299)
+    """)
+    fun observeBaseAssetsTotal(): Flow<com.example.data.model.CurrencyAssetDto?>
+
     @Query("SELECT * FROM journal_items ORDER BY id DESC")
     fun getAllJournalItems(): Flow<List<JournalItemEntity>>
 

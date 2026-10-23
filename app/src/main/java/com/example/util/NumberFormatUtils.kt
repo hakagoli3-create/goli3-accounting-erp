@@ -247,3 +247,24 @@ object NumberFormatUtils {
         return clean.toDoubleOrNull() ?: 0.0
     }
 }
+
+/**
+ * پسوند فرمت‌بندی اعداد با جداکننده سه رقمی و تبدیل به ارقام شکیل فارسی
+ */
+fun Long.formatWithSeparator(): String {
+    return NumberFormatUtils.formatPriceOnlyNumber(this)
+}
+
+fun Int.formatWithSeparator(): String {
+    return NumberFormatUtils.formatPriceOnlyNumber(this.toLong())
+}
+
+fun Double.formatWithSeparator(): String {
+    val longVal = this.toLong()
+    return if (this == longVal.toDouble()) {
+        NumberFormatUtils.formatPriceOnlyNumber(longVal)
+    } else {
+        NumberFormatUtils.formatQuantity(this)
+    }
+}
+

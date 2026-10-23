@@ -247,6 +247,7 @@ fun AccountingScreen(
                         generals = generals,
                         subsidiaries = subsidiaries,
                         trialBalance = trialBalance,
+                        currencyAssets = viewModel.assetsByCurrency.collectAsStateWithLifecycle().value,
                         onAddGeneral = { showAddGeneralDialog = true },
                         onAddSubsidiary = { showAddSubsidiaryDialog = true },
                         onEditGeneral = { gen -> editingGeneralAccount = gen },
@@ -569,6 +570,7 @@ private fun AccountTreeContent(
     generals: List<GeneralAccountEntity>,
     subsidiaries: List<SubsidiaryAccountEntity>,
     trialBalance: List<TrialBalanceRow>,
+    currencyAssets: List<com.example.data.model.CurrencyAssetDto> = emptyList(),
     onAddGeneral: () -> Unit,
     onAddSubsidiary: () -> Unit,
     onEditGeneral: (GeneralAccountEntity) -> Unit = {},
@@ -602,6 +604,16 @@ private fun AccountTreeContent(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(bottom = 88.dp)
     ) {
+        // ویجت گزارش کل دارایی‌ها به تفکیک ارز
+        if (currencyAssets.isNotEmpty()) {
+            item {
+                com.example.ui.components.MultiCurrencyAssetsWidget(
+                    currencyAssets = currencyAssets,
+                    modifier = Modifier.padding(horizontal = 0.dp)
+                )
+            }
+        }
+
         // نوار ابزار سرفصل‌ها + دکمه‌های تعریف حساب جدید
         item {
             Card(

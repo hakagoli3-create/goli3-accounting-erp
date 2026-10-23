@@ -8,6 +8,7 @@ import com.example.data.repository.InventoryRepository
 import com.example.data.repository.InvoiceRepository
 import com.example.data.repository.PartyRepository
 import com.example.data.repository.TreasuryRepository
+import com.example.data.model.CurrencyAssetDto
 import com.example.util.JalaliDate
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -126,4 +127,63 @@ class DashboardViewModel(
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = DashboardUiState(isLoading = true)
     )
+
+    /**
+     * گزارش کل دارایی‌ها به تفکیک ارز (تومان، دلار، یورو، لیر و سایر ارزهای ثبت‌شده)
+     */
+    val assetsByCurrency: StateFlow<List<CurrencyAssetDto>> = combine(
+        treasuryRepo.totalAssetsByCurrency,
+        accountingRepo.baseAssetsTotal,
+        treasuryRepo.totalCashBalance,
+        treasuryRepo.totalBankBalance
+    ) { treasuryCurrencies, baseAssetFromLedger, cash, bank ->
+        val defaultCurrencies = listOf("TOMAN", "USD", "EUR", "TRY")
+        val currencyMap = mutableMapOf<String, Double>()
+
+        // ۱. کل دارایی پایه (تومان): از مانده حساب‌های کل و معین دارایی (کد ۱ و ۲) یا موجودی نقد و بانک
+        val baseAmount = if (baseAssetFromLedger != null && baseAssetFromLedger.totalAmount != 0.0) {
+            baseAssetFromLedger.totalAmount
+        } else {
+            ((cash ?: 0L) + (bank ?: 0L)).toDouble()
+        }
+        currencyMap["TOMAN"] = baseAmount
+
+        // ۲. سایر ارزهای خزانه‌داری
+        for (asset in treasuryCurrencies) {
+            val code = asset.currencyType.trim().uppercase()
+            if (code == "TOMAN" || code == "تومان") {
+                if (currencyMap["TOMAN"] == 0.0 && asset.totalAmount > 0.0) {
+                    currencyMap["TOMAN"] = asset.totalAmount
+                }
+            } else {
+                currencyMap[code] = asset.totalAmount
+            }
+        }
+
+        // ۳. تضمین حضور ارزهای مرسوم (تومان، دلار، یورو و لیر)
+        for (code in defaultCurrencies) {
+            if (!currencyMap.containsKey(code)) {
+                currencyMap[code] = 0.0
+            }
+        }
+
+        val orderedCodes = listOf("TOMAN", "USD", "EUR", "TRY") + currencyMap.keys.filter { it !in listOf("TOMAN", "USD", "EUR", "TRY") }
+        orderedCodes.map { code ->
+            CurrencyAssetDto(
+                currencyType = when (code) {
+                    "TOMAN" -> "تومان"
+                    "USD" -> "دلار"
+                    "EUR" -> "یورو"
+                    "TRY" -> "لیر"
+                    else -> code
+                },
+                totalAmount = currencyMap[code] ?: 0.0
+            )
+        }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
 }
+

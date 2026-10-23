@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import com.example.data.model.CurrencyAssetDto
 import com.example.data.model.InvoiceWithItems
 import com.example.data.model.JournalItemWithVoucher
 import com.example.data.model.OfficialJournalRow
@@ -98,6 +99,16 @@ class AccountingViewModel(
 
     val trialBalance: StateFlow<List<TrialBalanceRow>> = repository.trialBalance
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val assetsByCurrency: StateFlow<List<CurrencyAssetDto>> = repository.baseAssetsTotal.map { baseAsset ->
+        val tomanAmount = baseAsset?.totalAmount ?: 0.0
+        listOf(
+            CurrencyAssetDto("تومان", tomanAmount),
+            CurrencyAssetDto("دلار", 0.0),
+            CurrencyAssetDto("یورو", 0.0),
+            CurrencyAssetDto("لیر", 0.0)
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val generalTrialBalance: StateFlow<List<com.example.data.model.GeneralTrialBalanceRow>> = repository.generalTrialBalance
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
