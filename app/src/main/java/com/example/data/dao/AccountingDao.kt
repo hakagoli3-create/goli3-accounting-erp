@@ -94,11 +94,30 @@ interface AccountingDao {
     fun getTotalCreditSum(): Flow<Long?>
 
     @Query("""
+        WITH AllBaseAssets AS (
+            SELECT CAST(COALESCE(SUM(currentBalance), 0) AS REAL) AS amount FROM cash_desks
+            UNION ALL
+            SELECT CAST(COALESCE(SUM(currentBalance), 0) AS REAL) AS amount FROM bank_accounts
+            UNION ALL
+            SELECT CAST(
+                MAX(
+                    0,
+                    COALESCE(
+                        (SELECT SUM(ji.debit - ji.credit) 
+                         FROM journal_items ji 
+                         INNER JOIN journal_entries je ON ji.voucherId = je.id 
+                         WHERE je.status != 'VOID' AND ji.generalCode = 101),
+                        0
+                    ) - (
+                        COALESCE((SELECT SUM(currentBalance) FROM cash_desks), 0) + 
+                        COALESCE((SELECT SUM(currentBalance) FROM bank_accounts), 0)
+                    )
+                ) AS REAL
+            ) AS amount
+        )
         SELECT 'تومان' AS currencyType,
-               CAST(COALESCE(SUM(ji.debit - ji.credit), 0) AS REAL) AS totalAmount
-        FROM journal_items ji
-        INNER JOIN journal_entries je ON ji.voucherId = je.id
-        WHERE je.status != 'VOID' AND (ji.generalCode BETWEEN 100 AND 299)
+               COALESCE(SUM(amount), 0.0) AS totalAmount
+        FROM AllBaseAssets
     """)
     fun observeBaseAssetsTotal(): Flow<com.example.data.model.CurrencyAssetDto?>
 

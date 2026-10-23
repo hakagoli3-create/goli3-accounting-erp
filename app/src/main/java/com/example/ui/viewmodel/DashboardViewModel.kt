@@ -13,6 +13,7 @@ import com.example.util.JalaliDate
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
 data class DashboardUiState(
@@ -130,37 +131,27 @@ class DashboardViewModel(
 
     /**
      * گزارش کل دارایی‌ها به تفکیک ارز (تومان، دلار، یورو، لیر و سایر ارزهای ثبت‌شده)
+     * به صورت جریان زنده و همگام با بخش خزانه‌داری و نقدینگی کل برنامه
      */
-    val assetsByCurrency: StateFlow<List<CurrencyAssetDto>> = combine(
-        treasuryRepo.totalAssetsByCurrency,
-        accountingRepo.baseAssetsTotal,
-        treasuryRepo.totalCashBalance,
-        treasuryRepo.totalBankBalance
-    ) { treasuryCurrencies, baseAssetFromLedger, cash, bank ->
+    val assetsByCurrency: StateFlow<List<CurrencyAssetDto>> = treasuryRepo.totalAssetsByCurrency.map { assetsList ->
         val defaultCurrencies = listOf("TOMAN", "USD", "EUR", "TRY")
         val currencyMap = mutableMapOf<String, Double>()
 
-        // ۱. کل دارایی پایه (تومان): از مانده حساب‌های کل و معین دارایی (کد ۱ و ۲) یا موجودی نقد و بانک
-        val baseAmount = if (baseAssetFromLedger != null && baseAssetFromLedger.totalAmount != 0.0) {
-            baseAssetFromLedger.totalAmount
-        } else {
-            ((cash ?: 0L) + (bank ?: 0L)).toDouble()
-        }
-        currencyMap["TOMAN"] = baseAmount
-
-        // ۲. سایر ارزهای خزانه‌داری
-        for (asset in treasuryCurrencies) {
-            val code = asset.currencyType.trim().uppercase()
-            if (code == "TOMAN" || code == "تومان") {
-                if (currencyMap["TOMAN"] == 0.0 && asset.totalAmount > 0.0) {
-                    currencyMap["TOMAN"] = asset.totalAmount
-                }
-            } else {
-                currencyMap[code] = asset.totalAmount
+        for (asset in assetsList) {
+            val code = when (asset.currencyType.trim().uppercase()) {
+                "تومان", "TOMAN" -> "TOMAN"
+                "دلار", "USD" -> "USD"
+                "یورو", "EUR" -> "EUR"
+                "لیر", "TRY" -> "TRY"
+                "درهم", "AED" -> "AED"
+                "دینار", "IQD" -> "IQD"
+                "ریال", "IRR" -> "IRR"
+                else -> asset.currencyType.trim().uppercase()
             }
+            currencyMap[code] = (currencyMap[code] ?: 0.0) + asset.totalAmount
         }
 
-        // ۳. تضمین حضور ارزهای مرسوم (تومان، دلار، یورو و لیر)
+        // تضمین حضور ارزهای اصلی (تومان، دلار، یورو و لیر)
         for (code in defaultCurrencies) {
             if (!currencyMap.containsKey(code)) {
                 currencyMap[code] = 0.0
@@ -175,6 +166,9 @@ class DashboardViewModel(
                     "USD" -> "دلار"
                     "EUR" -> "یورو"
                     "TRY" -> "لیر"
+                    "AED" -> "درهم"
+                    "IQD" -> "دینار"
+                    "IRR" -> "ریال"
                     else -> code
                 },
                 totalAmount = currencyMap[code] ?: 0.0

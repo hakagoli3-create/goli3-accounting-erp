@@ -116,10 +116,65 @@ interface TreasuryDao {
     fun getAllCurrencyBalances(): Flow<List<com.example.data.model.TreasuryCurrencyBalanceEntity>>
 
     @Query("""
-        SELECT currencyCode AS currencyType, 
-               COALESCE(SUM(balance), 0.0) AS totalAmount
-        FROM treasury_currency_balances
-        GROUP BY currencyCode
+        WITH CombinedAssets AS (
+            -- ۱. موجودی تومانی کلیه صندوق‌ها شامل موجودی‌های اول‌دوره و تمامی گردش‌های دریافتی/پرداختی
+            SELECT 'TOMAN' AS currencyType, 
+                   CAST(COALESCE(SUM(currentBalance), 0) AS REAL) AS amount 
+            FROM cash_desks
+            
+            UNION ALL
+            
+            -- ۲. موجودی تومانی کلیه حساب‌های بانکی و پوزها شامل موجودی‌های اول‌دوره و تراکنش‌ها
+            SELECT 'TOMAN' AS currencyType, 
+                   CAST(COALESCE(SUM(currentBalance), 0) AS REAL) AS amount 
+            FROM bank_accounts
+            
+            UNION ALL
+            
+            -- ۳. موجودی کلیه ارزهای خارجی (دلار، یورو، لیر، درهم و...) ثبت‌شده در خزانه‌داری
+            SELECT UPPER(TRIM(currencyCode)) AS currencyType, 
+                   COALESCE(SUM(balance), 0.0) AS amount 
+            FROM treasury_currency_balances 
+            WHERE UPPER(TRIM(currencyCode)) NOT IN ('TOMAN', 'تومان')
+            GROUP BY UPPER(TRIM(currencyCode))
+            
+            UNION ALL
+            
+            -- ۴. ردیف‌های تومانی ثبت‌شده در جدول تفکیک ارز که به صندوق یا بانک جاری منتسب نیستند
+            SELECT 'TOMAN' AS currencyType, 
+                   COALESCE(SUM(balance), 0.0) AS amount 
+            FROM treasury_currency_balances 
+            WHERE UPPER(TRIM(currencyCode)) IN ('TOMAN', 'تومان')
+              AND (
+                  (accountType = 'CASH' AND accountId NOT IN (SELECT id FROM cash_desks))
+                  OR (accountType = 'BANK' AND accountId NOT IN (SELECT id FROM bank_accounts))
+                  OR (accountType NOT IN ('CASH', 'BANK'))
+              )
+            
+            UNION ALL
+            
+            -- ۵. مانده خالص اسناد ثبت‌شده در کدینگ برای موجودی نقد و بانک (کد ۱۰۱) در صورتی که بیشتر از موجودی فیزیکی ثبت شده باشد
+            SELECT 'TOMAN' AS currencyType,
+                   CAST(
+                       MAX(
+                           0,
+                           COALESCE(
+                               (SELECT SUM(ji.debit - ji.credit) 
+                                FROM journal_items ji 
+                                INNER JOIN journal_entries je ON ji.voucherId = je.id 
+                                WHERE je.status != 'VOID' AND ji.generalCode = 101),
+                               0
+                           ) - (
+                               COALESCE((SELECT SUM(currentBalance) FROM cash_desks), 0) + 
+                               COALESCE((SELECT SUM(currentBalance) FROM bank_accounts), 0)
+                           )
+                       ) AS REAL
+                   ) AS amount
+        )
+        SELECT currencyType, 
+               COALESCE(SUM(amount), 0.0) AS totalAmount 
+        FROM CombinedAssets 
+        GROUP BY currencyType
     """)
     fun observeTotalAssetsByCurrency(): Flow<List<com.example.data.model.CurrencyAssetDto>>
 

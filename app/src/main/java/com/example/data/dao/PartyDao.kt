@@ -66,7 +66,7 @@ interface PartyDao {
     @Query("""
         UPDATE journal_items 
         SET partyId = NULL 
-        WHERE generalCode NOT IN (102, 301) AND partyId IS NOT NULL
+        WHERE subsidiaryCode NOT IN (10201, 30101) AND partyId IS NOT NULL
     """)
     suspend fun sanitizePartyJournalItems()
 
@@ -78,7 +78,7 @@ interface PartyDao {
             INNER JOIN journal_entries je ON ji.voucherId = je.id
             WHERE ji.partyId = :partyId 
               AND je.status != 'VOID'
-              AND ji.generalCode IN (102, 301)
+              AND ji.subsidiaryCode IN (10201, 30101)
         )
         WHERE id = :partyId
     """)
@@ -92,7 +92,7 @@ interface PartyDao {
             INNER JOIN journal_entries je ON ji.voucherId = je.id
             WHERE ji.partyId = parties.id 
               AND je.status != 'VOID'
-              AND ji.generalCode IN (102, 301)
+              AND ji.subsidiaryCode IN (10201, 30101)
         )
     """)
     suspend fun recalculateAllPartyBalances()

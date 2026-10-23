@@ -321,7 +321,7 @@ class InvoiceRepository(
                 if (chequeInBase > 0) {
                     journalItems.add(
                         JournalItemEntity(
-                            voucherId = 0L, generalCode = 102, subsidiaryCode = 10202, partyId = invoice.partyId,
+                            voucherId = 0L, generalCode = 102, subsidiaryCode = 10202, partyId = null,
                             description = "دریافت چک بابت فاکتور فروش ${invoice.invoiceNumber}$currencyNote", debit = chequeInBase, credit = 0L
                         )
                     )
@@ -395,7 +395,7 @@ class InvoiceRepository(
                 if (chequeInBase > 0) {
                     journalItems.add(
                         JournalItemEntity(
-                            voucherId = 0L, generalCode = 301, subsidiaryCode = 30102, partyId = invoice.partyId,
+                            voucherId = 0L, generalCode = 301, subsidiaryCode = 30102, partyId = null,
                             description = "صدور چک بابت خرید فاکتور ${invoice.invoiceNumber}$currencyNote", debit = 0L, credit = chequeInBase
                         )
                     )
@@ -437,7 +437,7 @@ class InvoiceRepository(
                 if (chequeInBase > 0) {
                     journalItems.add(
                         JournalItemEntity(
-                            voucherId = 0L, generalCode = 102, subsidiaryCode = 10202, partyId = invoice.partyId,
+                            voucherId = 0L, generalCode = 102, subsidiaryCode = 10202, partyId = null,
                             description = "استرداد چک بابت مرجوعی فروش ${invoice.invoiceNumber}", debit = 0L, credit = chequeInBase
                         )
                     )
@@ -497,7 +497,7 @@ class InvoiceRepository(
                 if (chequeInBase > 0) {
                     journalItems.add(
                         JournalItemEntity(
-                            voucherId = 0L, generalCode = 301, subsidiaryCode = 30102, partyId = invoice.partyId,
+                            voucherId = 0L, generalCode = 301, subsidiaryCode = 30102, partyId = null,
                             description = "استرداد چک بابت مرجوعی خرید ${invoice.invoiceNumber}", debit = chequeInBase, credit = 0L
                         )
                     )
@@ -704,7 +704,7 @@ class InvoiceRepository(
                     )
                     if (chequeInBase > 0) rollbackItems.add(
                         JournalItemEntity(
-                            voucherId = 0L, generalCode = 102, subsidiaryCode = 10202, partyId = invoice.partyId,
+                            voucherId = 0L, generalCode = 102, subsidiaryCode = 10202, partyId = null,
                             description = "برگشت چک دریافتی فاکتور باطل شده ${invoice.invoiceNumber}", debit = 0L, credit = chequeInBase
                         )
                     )
@@ -755,7 +755,7 @@ class InvoiceRepository(
                     )
                     if (chequeInBase > 0) rollbackItems.add(
                         JournalItemEntity(
-                            voucherId = 0L, generalCode = 301, subsidiaryCode = 30102, partyId = invoice.partyId,
+                            voucherId = 0L, generalCode = 301, subsidiaryCode = 30102, partyId = null,
                             description = "ابطال چک صادره خرید باطل شده ${invoice.invoiceNumber}", debit = chequeInBase, credit = 0L
                         )
                     )
@@ -787,7 +787,7 @@ class InvoiceRepository(
                     )
                     if (chequeInBase > 0) rollbackItems.add(
                         JournalItemEntity(
-                            voucherId = 0L, generalCode = 102, subsidiaryCode = 10202, partyId = invoice.partyId,
+                            voucherId = 0L, generalCode = 102, subsidiaryCode = 10202, partyId = null,
                             description = "برگشت چک استردادی مرجوعی فروش ${invoice.invoiceNumber}", debit = chequeInBase, credit = 0L
                         )
                     )
@@ -850,7 +850,7 @@ class InvoiceRepository(
                     )
                     if (chequeInBase > 0) rollbackItems.add(
                         JournalItemEntity(
-                            voucherId = 0L, generalCode = 301, subsidiaryCode = 30102, partyId = invoice.partyId,
+                            voucherId = 0L, generalCode = 301, subsidiaryCode = 30102, partyId = null,
                             description = "برگشت چک مرجوعی خرید ${invoice.invoiceNumber}", debit = 0L, credit = chequeInBase
                         )
                     )

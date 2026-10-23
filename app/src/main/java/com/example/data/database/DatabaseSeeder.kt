@@ -144,15 +144,18 @@ object DatabaseSeeder {
 
         // ۱۰. ثبت ردیف مانده اولیه ارز پایه برای صندوق اصلی با مقدار صفر
         try {
-            db.treasuryDao().insertOrUpdateCurrencyBalance(
-                TreasuryCurrencyBalanceEntity(
-                    id = 1,
-                    accountType = "CASH",
-                    accountId = 1,
-                    currencyCode = "TOMAN",
-                    balance = 0.0
+            val existing = db.treasuryDao().getCurrencyBalance("CASH", 1, "TOMAN")
+            if (existing == null) {
+                db.treasuryDao().insertOrUpdateCurrencyBalance(
+                    TreasuryCurrencyBalanceEntity(
+                        id = 0L,
+                        accountType = "CASH",
+                        accountId = 1,
+                        currencyCode = "TOMAN",
+                        balance = 0.0
+                    )
                 )
-            )
+            }
         } catch (_: Exception) {}
     }
 

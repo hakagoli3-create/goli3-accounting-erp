@@ -100,14 +100,46 @@ class AccountingViewModel(
     val trialBalance: StateFlow<List<TrialBalanceRow>> = repository.trialBalance
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val assetsByCurrency: StateFlow<List<CurrencyAssetDto>> = repository.baseAssetsTotal.map { baseAsset ->
-        val tomanAmount = baseAsset?.totalAmount ?: 0.0
-        listOf(
-            CurrencyAssetDto("تومان", tomanAmount),
-            CurrencyAssetDto("دلار", 0.0),
-            CurrencyAssetDto("یورو", 0.0),
-            CurrencyAssetDto("لیر", 0.0)
-        )
+    val assetsByCurrency: StateFlow<List<CurrencyAssetDto>> = repository.totalAssetsByCurrency.map { assetsList ->
+        val defaultCurrencies = listOf("TOMAN", "USD", "EUR", "TRY")
+        val currencyMap = mutableMapOf<String, Double>()
+
+        for (asset in assetsList) {
+            val code = when (asset.currencyType.trim().uppercase()) {
+                "تومان", "TOMAN" -> "TOMAN"
+                "دلار", "USD" -> "USD"
+                "یورو", "EUR" -> "EUR"
+                "لیر", "TRY" -> "TRY"
+                "درهم", "AED" -> "AED"
+                "دینار", "IQD" -> "IQD"
+                "ریال", "IRR" -> "IRR"
+                else -> asset.currencyType.trim().uppercase()
+            }
+            currencyMap[code] = (currencyMap[code] ?: 0.0) + asset.totalAmount
+        }
+
+        for (code in defaultCurrencies) {
+            if (!currencyMap.containsKey(code)) {
+                currencyMap[code] = 0.0
+            }
+        }
+
+        val orderedCodes = listOf("TOMAN", "USD", "EUR", "TRY") + currencyMap.keys.filter { it !in listOf("TOMAN", "USD", "EUR", "TRY") }
+        orderedCodes.map { code ->
+            CurrencyAssetDto(
+                currencyType = when (code) {
+                    "TOMAN" -> "تومان"
+                    "USD" -> "دلار"
+                    "EUR" -> "یورو"
+                    "TRY" -> "لیر"
+                    "AED" -> "درهم"
+                    "IQD" -> "دینار"
+                    "IRR" -> "ریال"
+                    else -> code
+                },
+                totalAmount = currencyMap[code] ?: 0.0
+            )
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val generalTrialBalance: StateFlow<List<com.example.data.model.GeneralTrialBalanceRow>> = repository.generalTrialBalance

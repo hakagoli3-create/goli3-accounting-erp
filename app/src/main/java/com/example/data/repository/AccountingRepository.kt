@@ -38,6 +38,8 @@ class AccountingRepository(
     val totalCreditSum: Flow<Long?> = dao.getTotalCreditSum()
     val allJournalItemsWithVoucher: Flow<List<JournalItemWithVoucher>> = dao.getJournalItemsWithVoucher()
     val baseAssetsTotal: Flow<com.example.data.model.CurrencyAssetDto?> = dao.observeBaseAssetsTotal()
+    val totalAssetsByCurrency: Flow<List<com.example.data.model.CurrencyAssetDto>> =
+        appDatabase?.treasuryDao()?.observeTotalAssetsByCurrency() ?: kotlinx.coroutines.flow.flowOf(emptyList())
 
     fun getGeneralAccountsByGroup(groupCode: Int): Flow<List<GeneralAccountEntity>> =
         dao.getGeneralAccountsByGroup(groupCode)
