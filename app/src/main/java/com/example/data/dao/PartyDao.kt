@@ -45,9 +45,44 @@ interface PartyDao {
     @Query("SELECT COUNT(*) FROM parties WHERE creditLimit > 0 AND currentBalance > creditLimit")
     fun getOverCreditLimitCount(): Flow<Int>
 
-    @Query("SELECT COALESCE(SUM(currentBalance), 0) FROM parties WHERE currentBalance > 0")
+    @Query("SELECT COALESCE(SUM(currentBalance), 0) FROM parties WHERE partyType IN ('CUSTOMER', 'BOTH') AND currentBalance > 0")
+    fun getCustomerReceivables(): Flow<Long>
+
+    @Query("SELECT COALESCE(SUM(ABS(currentBalance)), 0) FROM parties WHERE partyType IN ('SUPPLIER', 'BOTH') AND currentBalance < 0")
+    fun getSupplierPayables(): Flow<Long>
+
+    @Query("SELECT COALESCE(SUM(ABS(currentBalance)), 0) FROM parties WHERE partyType IN ('CUSTOMER', 'BOTH') AND currentBalance < 0")
+    fun getCustomerPayables(): Flow<Long>
+
+    @Query("SELECT COALESCE(SUM(currentBalance), 0) FROM parties WHERE partyType IN ('SUPPLIER', 'BOTH') AND currentBalance > 0")
+    fun getSupplierReceivables(): Flow<Long>
+
+    @Query("SELECT COALESCE(SUM(currentBalance), 0) FROM parties WHERE partyType IN ('CUSTOMER', 'BOTH') AND currentBalance > 0")
     fun getTotalReceivables(): Flow<Long>
 
-    @Query("SELECT COALESCE(SUM(ABS(currentBalance)), 0) FROM parties WHERE currentBalance < 0")
+    @Query("SELECT COALESCE(SUM(ABS(currentBalance)), 0) FROM parties WHERE partyType IN ('SUPPLIER', 'BOTH') AND currentBalance < 0")
     fun getTotalPayables(): Flow<Long>
+
+    @Query("""
+        UPDATE parties 
+        SET currentBalance = (
+            SELECT COALESCE(SUM(ji.debit - ji.credit), 0)
+            FROM journal_items ji
+            INNER JOIN journal_entries je ON ji.voucherId = je.id
+            WHERE ji.partyId = :partyId AND je.status != 'VOID'
+        )
+        WHERE id = :partyId
+    """)
+    suspend fun recalculatePartyBalance(partyId: Long)
+
+    @Query("""
+        UPDATE parties 
+        SET currentBalance = (
+            SELECT COALESCE(SUM(ji.debit - ji.credit), 0)
+            FROM journal_items ji
+            INNER JOIN journal_entries je ON ji.voucherId = je.id
+            WHERE ji.partyId = parties.id AND je.status != 'VOID'
+        )
+    """)
+    suspend fun recalculateAllPartyBalances()
 }

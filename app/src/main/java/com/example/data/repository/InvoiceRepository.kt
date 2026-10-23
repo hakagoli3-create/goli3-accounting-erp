@@ -957,17 +957,88 @@ class InvoiceRepository(
         try {
             val invoiceWithItems = invoiceDao.getInvoiceWithItemsById(invoiceId) ?: return@runInTransaction false
             val invoice = invoiceWithItems.invoice
+            val items = invoiceWithItems.items
 
-            // ۱. اگر فاکتور قطعی است، ابتدا اثرات انبار و مالی آن معکوس شوند
+            // ۱. اگر فاکتور قطعی است، موجودی انبار و مانده‌های خزانه‌داری را معکوس می‌کنیم
             if (invoice.status == "FINAL") {
-                try {
-                    rollbackInvoiceEffects(invoice, invoiceWithItems.items)
-                } catch (e: Exception) {
-                    android.util.Log.e("InvoiceRepository", "Warning: rollback before delete failed", e)
+                // الف) معکوس کردن موجودی کالا در انبار
+                for (item in items) {
+                    val reverseStock = when (invoice.invoiceType) {
+                        "SALE", "POS_SALE" -> item.quantityInSecondary // بازگشت به موجودی
+                        "PURCHASE" -> -item.quantityInSecondary // کسر از موجودی
+                        "RETURN_SALE" -> -item.quantityInSecondary // کسر از موجودی
+                        "RETURN_PURCHASE" -> item.quantityInSecondary // بازگشت به موجودی
+                        else -> item.quantityInSecondary
+                    }
+                    if (item.productId > 0) {
+                        try {
+                            inventoryDao.adjustStock(item.productId, reverseStock)
+                        } catch (e: Exception) {
+                            android.util.Log.e("InvoiceRepository", "Error adjusting stock on delete invoice: ${item.productId}", e)
+                        }
+                    }
+                }
+
+                // ب) محاسبه مبالغ پایه با نرخ تسعیر
+                val rate = if (invoice.currencyRateToBase > 0) invoice.currencyRateToBase else 1.0
+                fun toBase(amount: Long): Long {
+                    if (rate == 1.0 || amount == 0L) return amount
+                    return java.math.BigDecimal(amount)
+                        .multiply(java.math.BigDecimal.valueOf(rate))
+                        .setScale(0, java.math.RoundingMode.HALF_UP)
+                        .toLong()
+                }
+
+                val cashInBase = if (rate == 1.0 || invoice.cashAmountInBase <= 0L) toBase(invoice.cashAmount) else invoice.cashAmountInBase
+                val posInBase = if (rate == 1.0 || invoice.posAmountInBase <= 0L) toBase(invoice.posAmount) else invoice.posAmountInBase
+
+                val treasuryFactor = when (invoice.invoiceType) {
+                    "SALE", "POS_SALE", "RETURN_PURCHASE" -> -1L
+                    "PURCHASE", "RETURN_SALE" -> 1L
+                    else -> -1L
+                }
+
+                // ج) معکوس کردن خزانه‌داری (صندوق و پوز)
+                if (invoice.cashAmount > 0) {
+                    try {
+                        treasuryDao.updateCashBalance(invoice.cashDeskId, treasuryFactor * cashInBase)
+                        val currBal = treasuryDao.getCurrencyBalance("CASH", invoice.cashDeskId, invoice.currencyCode)
+                        val newBal = (currBal?.balance ?: 0.0) + (treasuryFactor * invoice.cashAmount)
+                        treasuryDao.insertOrUpdateCurrencyBalance(
+                            com.example.data.model.TreasuryCurrencyBalanceEntity(
+                                id = currBal?.id ?: 0L,
+                                accountType = "CASH",
+                                accountId = invoice.cashDeskId,
+                                currencyCode = invoice.currencyCode,
+                                balance = newBal
+                            )
+                        )
+                    } catch (e: Exception) {
+                        android.util.Log.e("InvoiceRepository", "Error reversing cash balance on delete", e)
+                    }
+                }
+
+                if (invoice.posAmount > 0) {
+                    try {
+                        treasuryDao.updateBankBalance(invoice.bankAccountId, treasuryFactor * posInBase)
+                        val currBal = treasuryDao.getCurrencyBalance("BANK", invoice.bankAccountId, invoice.currencyCode)
+                        val newBal = (currBal?.balance ?: 0.0) + (treasuryFactor * invoice.posAmount)
+                        treasuryDao.insertOrUpdateCurrencyBalance(
+                            com.example.data.model.TreasuryCurrencyBalanceEntity(
+                                id = currBal?.id ?: 0L,
+                                accountType = "BANK",
+                                accountId = invoice.bankAccountId,
+                                currencyCode = invoice.currencyCode,
+                                balance = newBal
+                            )
+                        )
+                    } catch (e: Exception) {
+                        android.util.Log.e("InvoiceRepository", "Error reversing bank balance on delete", e)
+                    }
                 }
             }
 
-            // ۲. پاکسازی قطعی تمام گردش‌های انبار (Kardex) و اسناد معکوس (REV-INV) مربوط به این فاکتور جهت رفع رکوردهای یتیم (Orphan Removal)
+            // ۲. پاکسازی قطعی تمام گردش‌های کاردکس انبار مربوط به این فاکتور (کاردکس بدون رکورد یتیم)
             try {
                 inventoryDao.deleteMovementsByReference(invoice.invoiceNumber)
                 inventoryDao.deleteMovementsByReference("REV-${invoice.invoiceNumber}")
@@ -975,27 +1046,45 @@ class InvoiceRepository(
                 android.util.Log.e("InvoiceRepository", "Error cleaning kardex movements for deleted invoice ${invoice.invoiceNumber}", e)
             }
 
-            // پاکسازی چک‌های ثبت‌شده برای این فاکتور
+            // ۳. پاکسازی چک‌های صیادی وابسته به فاکتور
             try {
                 treasuryDao.deleteChequesByInvoiceNumber(invoice.invoiceNumber)
             } catch (e: Exception) {
                 android.util.Log.e("InvoiceRepository", "Error cleaning cheques for deleted invoice ${invoice.invoiceNumber}", e)
             }
 
-            // ۳. حذف ردیف‌های اقلام فاکتور ابتدا تا نقض کلید خارجی در دیتابیس رخ ندهد
+            // ۴. پاکسازی کامل اسناد حسابداری دوبل و کلیه آرتیکل‌های وابسته (بدون رکورد یتیم در دفاتر روزنامه و کل)
+            try {
+                accountingDao.deleteJournalItemsByDescriptionPattern(invoice.invoiceNumber)
+                accountingDao.deleteJournalEntriesByDescriptionPattern(invoice.invoiceNumber)
+            } catch (e: Exception) {
+                android.util.Log.e("InvoiceRepository", "Error removing journal vouchers for deleted invoice ${invoice.invoiceNumber}", e)
+            }
+
+            // ۵. حذف ردیف‌های اقلام فاکتور
             try {
                 invoiceDao.deleteInvoiceItemsForInvoice(invoiceId)
             } catch (e: Exception) {
                 android.util.Log.e("InvoiceRepository", "Error deleting invoice items", e)
             }
 
-            // ۴. حذف خود سند فاکتور از دیتابیس
+            // ۶. حذف قطعی سربرگ فاکتور
             val rowsDeleted = try {
                 invoiceDao.deleteInvoiceById(invoiceId)
             } catch (e: Exception) {
                 invoiceDao.deleteInvoice(invoice)
                 1
             }
+
+            // ۷. محاسبه مجدد و قطعی مانده حساب طرف‌حساب از روی دفاتر حسابداری فعال (Zero Drift)
+            if (invoice.partyId != null) {
+                try {
+                    partyDao.recalculatePartyBalance(invoice.partyId)
+                } catch (e: Exception) {
+                    android.util.Log.e("InvoiceRepository", "Error recalculating party balance after delete invoice", e)
+                }
+            }
+
             rowsDeleted > 0
         } catch (e: Exception) {
             android.util.Log.e("InvoiceRepository", "Fatal error in deleteInvoice", e)

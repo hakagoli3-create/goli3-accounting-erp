@@ -259,6 +259,7 @@ class AccountingRepository(
             val items = dao.getJournalItemsByVoucherSync(voucherId)
             val partyDao = appDatabase?.partyDao()
             val expenseDao = appDatabase?.expenseAndIncomeDao()
+            val affectedPartyIds = items.mapNotNull { it.partyId }.distinct()
 
             // Revert party balances if the voucher was active
             if (entry.status != "VOID" && partyDao != null) {
@@ -280,6 +281,17 @@ class AccountingRepository(
 
             dao.deleteJournalItemsByVoucher(voucherId)
             dao.deleteJournalEntry(entry)
+
+            // Recalculate party balances from ground truth non-void vouchers
+            if (partyDao != null) {
+                affectedPartyIds.forEach { partyId ->
+                    try {
+                        partyDao.recalculatePartyBalance(partyId)
+                    } catch (e: Exception) {
+                        // ignore
+                    }
+                }
+            }
         }
     }
 

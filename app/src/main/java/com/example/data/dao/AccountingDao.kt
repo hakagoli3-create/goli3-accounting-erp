@@ -134,6 +134,15 @@ interface AccountingDao {
     @Query("DELETE FROM journal_entries WHERE id = :voucherId")
     suspend fun deleteJournalEntryById(voucherId: Long)
 
+    @Query("SELECT * FROM journal_entries WHERE description LIKE '%' || :pattern || '%'")
+    suspend fun getJournalEntriesByDescriptionPattern(pattern: String): List<JournalEntryEntity>
+
+    @Query("DELETE FROM journal_items WHERE voucherId IN (SELECT id FROM journal_entries WHERE description LIKE '%' || :pattern || '%')")
+    suspend fun deleteJournalItemsByDescriptionPattern(pattern: String): Int
+
+    @Query("DELETE FROM journal_entries WHERE description LIKE '%' || :pattern || '%'")
+    suspend fun deleteJournalEntriesByDescriptionPattern(pattern: String): Int
+
     @Query("""
         SELECT ji.id, ji.voucherId, je.voucherNumber, je.jalaliDate, je.status AS voucherStatus,
                je.description AS voucherDescription, ji.generalCode, ji.subsidiaryCode,

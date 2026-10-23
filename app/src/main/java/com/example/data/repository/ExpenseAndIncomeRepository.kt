@@ -153,31 +153,50 @@ class ExpenseAndIncomeRepository(
     }
 
     suspend fun deleteExpense(expense: ExpenseEntity) = runInTransaction {
-        // Revert treasury balance effect (+amount)
+        // ۱. بازگشت مانده خزانه‌داری
         if (expense.paymentMethod == "CASH" && expense.cashDeskId != null) {
             treasuryDao.updateCashBalance(expense.cashDeskId, expense.amount)
         } else if (expense.paymentMethod == "BANK" && expense.bankAccountId != null) {
             treasuryDao.updateBankBalance(expense.bankAccountId, expense.amount)
         }
 
-        // Void or delete linked journal voucher
+        // ۲. حذف کامل سند حسابداری متصل و تمام آرتیکل‌های آن (حذف قطعی رکوردهای یتیم)
+        var affectedPartyId: Long? = null
         expense.voucherId?.let { vId ->
             try {
-                accountingDao.voidJournalEntry(vId)
+                val items = accountingDao.getJournalItemsByVoucherSync(vId)
+                affectedPartyId = items.firstOrNull { it.partyId != null }?.partyId
                 accountingDao.deleteJournalItemsByVoucher(vId)
+                accountingDao.deleteJournalEntryById(vId)
             } catch (e: Exception) {
-                // Ignore
+                android.util.Log.e("ExpenseAndIncomeRepo", "Error deleting voucher $vId for expense", e)
             }
         }
 
+        // ۳. حذف رکورد هزینه
         expenseAndIncomeDao.deleteExpense(expense)
+
+        // ۴. محاسبه مجدد مانده طرف‌حساب در صورت وجود آرتیکل شخص
+        if (affectedPartyId != null) {
+            try {
+                appDatabase?.partyDao()?.recalculatePartyBalance(affectedPartyId!!)
+            } catch (e: Exception) {
+                android.util.Log.e("ExpenseAndIncomeRepo", "Error recalculating party balance", e)
+            }
+        }
     }
 
     suspend fun insertDirectExpense(expense: ExpenseEntity): Long =
         expenseAndIncomeDao.insertExpense(expense)
 
+    suspend fun getExpenseById(id: Long): ExpenseEntity? =
+        expenseAndIncomeDao.getExpenseById(id)
+
     suspend fun insertDirectIncome(income: IncomeEntity): Long =
         expenseAndIncomeDao.insertIncome(income)
+
+    suspend fun getIncomeById(id: Long): IncomeEntity? =
+        expenseAndIncomeDao.getIncomeById(id)
 
     // --- Income Categories ---
     val allIncomeCategories: Flow<List<IncomeCategoryEntity>> =
@@ -300,22 +319,36 @@ class ExpenseAndIncomeRepository(
     }
 
     suspend fun deleteIncome(income: IncomeEntity) = runInTransaction {
-        // Revert treasury balance effect (-amount)
+        // ۱. بازگشت مانده خزانه‌داری
         if (income.depositMethod == "CASH" && income.cashDeskId != null) {
             treasuryDao.updateCashBalance(income.cashDeskId, -income.amount)
         } else if (income.depositMethod == "BANK" && income.bankAccountId != null) {
             treasuryDao.updateBankBalance(income.bankAccountId, -income.amount)
         }
 
+        // ۲. حذف کامل سند حسابداری متصل و تمام آرتیکل‌های آن (حذف قطعی رکوردهای یتیم)
+        var affectedPartyId: Long? = null
         income.voucherId?.let { vId ->
             try {
-                accountingDao.voidJournalEntry(vId)
+                val items = accountingDao.getJournalItemsByVoucherSync(vId)
+                affectedPartyId = items.firstOrNull { it.partyId != null }?.partyId
                 accountingDao.deleteJournalItemsByVoucher(vId)
+                accountingDao.deleteJournalEntryById(vId)
             } catch (e: Exception) {
-                // Ignore
+                android.util.Log.e("ExpenseAndIncomeRepo", "Error deleting voucher $vId for income", e)
             }
         }
 
+        // ۳. حذف رکورد درآمد
         expenseAndIncomeDao.deleteIncome(income)
+
+        // ۴. محاسبه مجدد مانده طرف‌حساب در صورت وجود آرتیکل شخص
+        if (affectedPartyId != null) {
+            try {
+                appDatabase?.partyDao()?.recalculatePartyBalance(affectedPartyId!!)
+            } catch (e: Exception) {
+                android.util.Log.e("ExpenseAndIncomeRepo", "Error recalculating party balance", e)
+            }
+        }
     }
 }

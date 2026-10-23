@@ -12,6 +12,10 @@ class PartyRepository(val dao: PartyDao) {
     val overCreditLimitCount: Flow<Int> = dao.getOverCreditLimitCount()
     val totalReceivables: Flow<Long> = dao.getTotalReceivables()
     val totalPayables: Flow<Long> = dao.getTotalPayables()
+    val customerReceivables: Flow<Long> = dao.getCustomerReceivables()
+    val supplierPayables: Flow<Long> = dao.getSupplierPayables()
+    val customerPayables: Flow<Long> = dao.getCustomerPayables()
+    val supplierReceivables: Flow<Long> = dao.getSupplierReceivables()
 
     fun searchParties(query: String): Flow<List<PartyEntity>> = dao.searchParties(query)
 
@@ -28,4 +32,10 @@ class PartyRepository(val dao: PartyDao) {
 
     suspend fun updatePartyBalance(partyId: Long, delta: Long) =
         dao.updatePartyBalance(partyId, delta)
+
+    suspend fun recalculatePartyBalance(partyId: Long) =
+        dao.recalculatePartyBalance(partyId)
+
+    suspend fun recalculateAllPartyBalances() =
+        dao.recalculateAllPartyBalances()
 }
