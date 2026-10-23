@@ -14,7 +14,7 @@ android {
 
   defaultConfig {
     applicationId = "com.aistudio.goliaccounting.kxrvzt"
-    minSdk = 29
+    minSdk = 26
     targetSdk = 35
     val runNum = project.findProperty("versionCode")?.toString()?.toIntOrNull()
     val ciVersionCode = if (runNum != null) (runNum + 10) else null
