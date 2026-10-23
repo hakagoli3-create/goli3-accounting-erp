@@ -59,6 +59,12 @@ interface ExpenseAndIncomeDao {
     @Query("SELECT * FROM expenses WHERE id = :id LIMIT 1")
     suspend fun getExpenseById(id: Long): ExpenseEntity?
 
+    @Query("UPDATE expenses SET voucherId = NULL WHERE voucherId = :voucherId")
+    suspend fun unlinkVoucherFromExpenses(voucherId: Long)
+
+    @Query("UPDATE incomes SET voucherId = NULL WHERE voucherId = :voucherId")
+    suspend fun unlinkVoucherFromIncomes(voucherId: Long)
+
     @Query("SELECT SUM(amount) FROM expenses")
     fun getTotalExpenses(): Flow<Long?>
 

@@ -63,6 +63,21 @@ class AccountingRepository(
         dao.getJournalItemsByVoucherSync(voucherId)
 
     suspend fun approveVoucher(voucherId: Long) = runInTransaction {
+        val entry = dao.getJournalEntryById(voucherId)
+        if (entry != null && entry.status == "VOID") {
+            val items = dao.getJournalItemsByVoucherSync(voucherId)
+            val partyDao = appDatabase?.partyDao()
+            if (partyDao != null) {
+                items.forEach { itm ->
+                    if (itm.partyId != null) {
+                        val net = itm.debit - itm.credit
+                        if (net != 0L) {
+                            partyDao.updatePartyBalance(itm.partyId, net)
+                        }
+                    }
+                }
+            }
+        }
         dao.approveJournalEntry(voucherId)
     }
 
@@ -147,76 +162,91 @@ class AccountingRepository(
     }
 
     /**
-     * گزارش تراز آزمایشی معین (۴ ستونه / ۲ ستونه)
+     * گزارش تراز آزمایشی معین (۴ ستونه / ۲ ستونه) بر مبنای اسناد معتبر و فعال (غیرباطل)
      */
-    val trialBalance: Flow<List<TrialBalanceRow>> = combine(
-        dao.getAllSubsidiaryAccounts(),
-        dao.getAllGeneralAccounts(),
-        dao.getAllAccountGroups(),
-        dao.getAllJournalItems()
-    ) { subs, generals, groups, items ->
-        val generalMap = generals.associateBy { it.code }
-        val groupMap = groups.associateBy { it.code }
+     val trialBalance: Flow<List<TrialBalanceRow>> = combine(
+         dao.getAllSubsidiaryAccounts(),
+         dao.getAllGeneralAccounts(),
+         dao.getAllAccountGroups(),
+         dao.getActiveJournalItems()
+     ) { subs, generals, groups, items ->
+         val generalMap = generals.associateBy { it.code }
+         val groupMap = groups.associateBy { it.code }
 
-        subs.map { sub ->
-            val gen = generalMap[sub.generalCode]
-            val grp = gen?.let { groupMap[it.groupCode] }
+         subs.map { sub ->
+             val gen = generalMap[sub.generalCode]
+             val grp = gen?.let { groupMap[it.groupCode] }
 
-            val subItems = items.filter { it.subsidiaryCode == sub.code }
-            val totalDebit = subItems.sumOf { it.debit }
-            val totalCredit = subItems.sumOf { it.credit }
+             val subItems = items.filter { it.subsidiaryCode == sub.code }
+             val totalDebit = subItems.sumOf { it.debit }
+             val totalCredit = subItems.sumOf { it.credit }
 
-            val balance = totalDebit - totalCredit
-            val balanceDebit = if (balance > 0) balance else 0L
-            val balanceCredit = if (balance < 0) -balance else 0L
+             val balance = totalDebit - totalCredit
+             val balanceDebit = if (balance > 0) balance else 0L
+             val balanceCredit = if (balance < 0) -balance else 0L
 
-            TrialBalanceRow(
-                subsidiaryCode = sub.code,
-                title = sub.title,
-                generalTitle = gen?.title ?: "نامشخص",
-                groupTitle = grp?.title ?: "نامشخص",
-                totalDebit = totalDebit,
-                totalCredit = totalCredit,
-                balanceDebit = balanceDebit,
-                balanceCredit = balanceCredit
-            )
-        }.filter { it.totalDebit > 0 || it.totalCredit > 0 }
-    }
+             TrialBalanceRow(
+                 subsidiaryCode = sub.code,
+                 title = sub.title,
+                 generalTitle = gen?.title ?: "نامشخص",
+                 groupTitle = grp?.title ?: "نامشخص",
+                 totalDebit = totalDebit,
+                 totalCredit = totalCredit,
+                 balanceDebit = balanceDebit,
+                 balanceCredit = balanceCredit
+             )
+         }.filter { it.totalDebit > 0 || it.totalCredit > 0 }
+     }
 
     /**
-     * گزارش تراز آزمایشی در سطح حساب‌های کل
+     * گزارش تراز آزمایشی در سطح حساب‌های کل بر مبنای اسناد فعال
      */
-    val generalTrialBalance: Flow<List<com.example.data.model.GeneralTrialBalanceRow>> = combine(
-        dao.getAllGeneralAccounts(),
-        dao.getAllAccountGroups(),
-        dao.getAllJournalItems()
-    ) { generals, groups, items ->
-        val groupMap = groups.associateBy { it.code }
+     val generalTrialBalance: Flow<List<com.example.data.model.GeneralTrialBalanceRow>> = combine(
+         dao.getAllGeneralAccounts(),
+         dao.getAllAccountGroups(),
+         dao.getActiveJournalItems()
+     ) { generals, groups, items ->
+         val groupMap = groups.associateBy { it.code }
 
-        generals.map { gen ->
-            val grp = groupMap[gen.groupCode]
-            val genItems = items.filter { it.generalCode == gen.code }
-            val totalDebit = genItems.sumOf { it.debit }
-            val totalCredit = genItems.sumOf { it.credit }
+         generals.map { gen ->
+             val grp = groupMap[gen.groupCode]
+             val genItems = items.filter { it.generalCode == gen.code }
+             val totalDebit = genItems.sumOf { it.debit }
+             val totalCredit = genItems.sumOf { it.credit }
 
-            val balance = totalDebit - totalCredit
-            val balanceDebit = if (balance > 0) balance else 0L
-            val balanceCredit = if (balance < 0) -balance else 0L
+             val balance = totalDebit - totalCredit
+             val balanceDebit = if (balance > 0) balance else 0L
+             val balanceCredit = if (balance < 0) -balance else 0L
 
-            com.example.data.model.GeneralTrialBalanceRow(
-                generalCode = gen.code,
-                title = gen.title,
-                groupTitle = grp?.title ?: "نامشخص",
-                totalDebit = totalDebit,
-                totalCredit = totalCredit,
-                balanceDebit = balanceDebit,
-                balanceCredit = balanceCredit
-            )
-        }.filter { it.totalDebit > 0 || it.totalCredit > 0 }
-    }
+             com.example.data.model.GeneralTrialBalanceRow(
+                 generalCode = gen.code,
+                 title = gen.title,
+                 groupTitle = grp?.title ?: "نامشخص",
+                 totalDebit = totalDebit,
+                 totalCredit = totalCredit,
+                 balanceDebit = balanceDebit,
+                 balanceCredit = balanceCredit
+             )
+         }.filter { it.totalDebit > 0 || it.totalCredit > 0 }
+     }
 
     suspend fun voidVoucher(voucherId: Long) = runInTransaction {
-        dao.voidJournalEntry(voucherId)
+        val entry = dao.getJournalEntryById(voucherId)
+        if (entry != null && entry.status != "VOID") {
+            val items = dao.getJournalItemsByVoucherSync(voucherId)
+            val partyDao = appDatabase?.partyDao()
+            if (partyDao != null) {
+                items.forEach { itm ->
+                    if (itm.partyId != null) {
+                        val net = itm.debit - itm.credit
+                        if (net != 0L) {
+                            partyDao.updatePartyBalance(itm.partyId, -net)
+                        }
+                    }
+                }
+            }
+            dao.voidJournalEntry(voucherId)
+        }
     }
 
     suspend fun updateVoucher(entry: JournalEntryEntity) = runInTransaction {
@@ -226,8 +256,100 @@ class AccountingRepository(
     suspend fun deleteVoucher(voucherId: Long) = runInTransaction {
         val entry = dao.getJournalEntryById(voucherId)
         if (entry != null) {
+            val items = dao.getJournalItemsByVoucherSync(voucherId)
+            val partyDao = appDatabase?.partyDao()
+            val expenseDao = appDatabase?.expenseAndIncomeDao()
+
+            // Revert party balances if the voucher was active
+            if (entry.status != "VOID" && partyDao != null) {
+                items.forEach { itm ->
+                    if (itm.partyId != null) {
+                        val net = itm.debit - itm.credit
+                        if (net != 0L) {
+                            partyDao.updatePartyBalance(itm.partyId, -net)
+                        }
+                    }
+                }
+            }
+
+            // Unlink from expenses and incomes if connected
+            if (expenseDao != null) {
+                expenseDao.unlinkVoucherFromExpenses(voucherId)
+                expenseDao.unlinkVoucherFromIncomes(voucherId)
+            }
+
             dao.deleteJournalItemsByVoucher(voucherId)
             dao.deleteJournalEntry(entry)
+        }
+    }
+
+    /**
+     * ویرایش کامل سند حسابداری به همراه سطرهای آرتیکل و هماهنگ‌سازی اتمیک تمامی وابستگی‌ها و مانده‌ها
+     */
+    suspend fun updateFullJournalVoucher(
+        voucherId: Long,
+        updatedDescription: String,
+        updatedDate: String,
+        updatedItems: List<JournalItemEntity>
+    ): Result<Unit> {
+        val totalDebit = updatedItems.sumOf { it.debit }
+        val totalCredit = updatedItems.sumOf { it.credit }
+
+        if (totalDebit != totalCredit) {
+            return Result.failure(
+                IllegalArgumentException("سند تراز نیست! مجموع بدهکار ($totalDebit) با مجموع بستانکار ($totalCredit) برابر نمی‌باشد.")
+            )
+        }
+        if (updatedItems.size < 2) {
+            return Result.failure(IllegalArgumentException("سند باید حداقل شامل ۲ سطر آرتیکل باشد."))
+        }
+
+        return runCatching {
+            runInTransaction {
+                val existingEntry = dao.getJournalEntryById(voucherId)
+                    ?: throw IllegalArgumentException("سند با شناسه $voucherId یافت نشد.")
+
+                val oldItems = dao.getJournalItemsByVoucherSync(voucherId)
+                val partyDao = appDatabase?.partyDao()
+
+                // ۱. بازگشت اثر مالی قبلی بر مانده طرف‌حساب‌ها (در صورت فعال بودن سند)
+                if (existingEntry.status != "VOID" && partyDao != null) {
+                    oldItems.forEach { itm ->
+                        if (itm.partyId != null) {
+                            val oldNet = itm.debit - itm.credit
+                            if (oldNet != 0L) {
+                                partyDao.updatePartyBalance(itm.partyId, -oldNet)
+                            }
+                        }
+                    }
+                }
+
+                // ۲. حذف آرتیکل‌های قدیمی و ثبت آرتیکل‌های جدید
+                dao.deleteJournalItemsByVoucher(voucherId)
+                val attachedItems = updatedItems.map { it.copy(id = 0L, voucherId = voucherId) }
+                dao.insertJournalItems(attachedItems)
+
+                // ۳. اعمال اثر مالی جدید بر مانده طرف‌حساب‌ها
+                if (existingEntry.status != "VOID" && partyDao != null) {
+                    attachedItems.forEach { itm ->
+                        if (itm.partyId != null) {
+                            val newNet = itm.debit - itm.credit
+                            if (newNet != 0L) {
+                                partyDao.updatePartyBalance(itm.partyId, newNet)
+                            }
+                        }
+                    }
+                }
+
+                // ۴. به‌روزرسانی سربرگ سند
+                dao.updateJournalEntry(
+                    existingEntry.copy(
+                        description = updatedDescription,
+                        jalaliDate = updatedDate,
+                        isBalanced = true
+                    )
+                )
+            }
         }
     }
 

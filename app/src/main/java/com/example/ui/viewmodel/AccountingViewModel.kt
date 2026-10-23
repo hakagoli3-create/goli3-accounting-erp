@@ -506,6 +506,47 @@ class AccountingViewModel(
         }
     }
 
+    fun updateFullJournalVoucher(
+        voucher: JournalEntryEntity,
+        newDesc: String,
+        newDate: String,
+        newItems: List<VoucherItemDraft>,
+        onSuccess: () -> Unit
+    ) {
+        viewModelScope.launch {
+            val totalDebit = newItems.sumOf { it.debit }
+            val totalCredit = newItems.sumOf { it.credit }
+            if (newItems.size < 2) {
+                _operationMessage.value = "سند حسابداری باید حداقل دارای ۲ سطر آرتیکل باشد."
+                return@launch
+            }
+            if (totalDebit != totalCredit) {
+                _operationMessage.value = "سند تراز نیست! اختلاف: ${Math.abs(totalDebit - totalCredit)} تومان"
+                return@launch
+            }
+
+            val items = newItems.map {
+                JournalItemEntity(
+                    voucherId = voucher.id,
+                    generalCode = it.generalCode,
+                    subsidiaryCode = it.subsidiaryCode,
+                    partyId = it.partyId,
+                    description = it.description.ifBlank { newDesc.ifBlank { voucher.description } },
+                    debit = it.debit,
+                    credit = it.credit
+                )
+            }
+
+            val res = repository.updateFullJournalVoucher(voucher.id, newDesc.ifBlank { voucher.description }, newDate, items)
+            if (res.isSuccess) {
+                _operationMessage.value = "سند شماره ${voucher.voucherNumber} و آرتیکل‌ها با موفقیت ویرایش شدند و تمامی مانده‌ها به‌روز گردیدند."
+                onSuccess()
+            } else {
+                _operationMessage.value = res.exceptionOrNull()?.message ?: "خطا در ویرایش سند"
+            }
+        }
+    }
+
     fun deleteVoucher(voucherId: Long, onSuccess: () -> Unit) {
         viewModelScope.launch {
             repository.deleteVoucher(voucherId)

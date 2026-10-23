@@ -96,6 +96,14 @@ interface AccountingDao {
     @Query("SELECT * FROM journal_items ORDER BY id DESC")
     fun getAllJournalItems(): Flow<List<JournalItemEntity>>
 
+    @Query("""
+        SELECT ji.* FROM journal_items ji
+        INNER JOIN journal_entries je ON ji.voucherId = je.id
+        WHERE je.status != 'VOID'
+        ORDER BY ji.id DESC
+    """)
+    fun getActiveJournalItems(): Flow<List<JournalItemEntity>>
+
     @Query("SELECT * FROM journal_items WHERE partyId = :partyId ORDER BY id ASC")
     fun getJournalItemsByParty(partyId: Long): Flow<List<JournalItemEntity>>
 

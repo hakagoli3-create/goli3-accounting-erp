@@ -156,6 +156,7 @@ fun AccountingScreen(
     val partyLedgerEntries by viewModel.partyLedgerEntries.collectAsStateWithLifecycle()
     val selectedSubsidiary by viewModel.selectedSubsidiaryForLedger.collectAsStateWithLifecycle()
     val subsidiaryLedgerEntries by viewModel.subsidiaryLedgerEntries.collectAsStateWithLifecycle()
+    val subsidiaryLedgerWithVouchers by viewModel.subsidiaryLedgerWithVouchers.collectAsStateWithLifecycle()
     val trialBalance by viewModel.trialBalance.collectAsStateWithLifecycle()
     val generalTrialBalance by viewModel.generalTrialBalance.collectAsStateWithLifecycle()
     val profitLoss by viewModel.profitLoss.collectAsStateWithLifecycle()
@@ -172,7 +173,12 @@ fun AccountingScreen(
     var ledgerSubTab by remember { mutableStateOf("SUBSIDIARY") } // "SUBSIDIARY" or "PARTY"
     var showAddGeneralDialog by remember { mutableStateOf(false) }
     var showAddSubsidiaryDialog by remember { mutableStateOf(false) }
+    var editingGeneralAccount by remember { mutableStateOf<GeneralAccountEntity?>(null) }
+    var deletingGeneralAccount by remember { mutableStateOf<GeneralAccountEntity?>(null) }
+    var editingSubsidiaryAccount by remember { mutableStateOf<SubsidiaryAccountEntity?>(null) }
+    var deletingSubsidiaryAccount by remember { mutableStateOf<SubsidiaryAccountEntity?>(null) }
     var viewingVoucherDetails by remember { mutableStateOf<JournalEntryEntity?>(null) }
+    var fullEditingVoucher by remember { mutableStateOf<JournalEntryEntity?>(null) }
 
     LaunchedEffect(operationMessage) {
         operationMessage?.let {
@@ -243,6 +249,10 @@ fun AccountingScreen(
                         trialBalance = trialBalance,
                         onAddGeneral = { showAddGeneralDialog = true },
                         onAddSubsidiary = { showAddSubsidiaryDialog = true },
+                        onEditGeneral = { gen -> editingGeneralAccount = gen },
+                        onDeleteGeneral = { gen -> deletingGeneralAccount = gen },
+                        onEditSubsidiary = { sub -> editingSubsidiaryAccount = sub },
+                        onDeleteSubsidiary = { sub -> deletingSubsidiaryAccount = sub },
                         onOpenLedger = { code ->
                             viewModel.selectSubsidiaryForLedger(code)
                             ledgerSubTab = "SUBSIDIARY"
@@ -278,6 +288,9 @@ fun AccountingScreen(
                         },
                         onUpdateVoucher = { entry, desc, date ->
                             viewModel.updateVoucher(entry, desc, date) {}
+                        },
+                        onFullEditVoucher = { entry ->
+                            fullEditingVoucher = entry
                         },
                         onDeleteVoucher = { voucherId ->
                             viewModel.deleteVoucher(voucherId) {}
@@ -331,6 +344,7 @@ fun AccountingScreen(
                                     generals = generals,
                                     selectedSub = selectedSubsidiary,
                                     ledgerEntries = subsidiaryLedgerEntries,
+                                    ledgerWithVouchers = subsidiaryLedgerWithVouchers,
                                     onSelectSubsidiary = { code -> viewModel.selectSubsidiaryForLedger(code) },
                                     onExportPdf = {
                                         selectedSubsidiary?.let { sub ->
@@ -341,6 +355,9 @@ fun AccountingScreen(
                                         selectedSubsidiary?.let { sub ->
                                             viewModel.exportSubsidiaryLedgerCsv(context, sub, subsidiaryLedgerEntries)
                                         }
+                                    },
+                                    onViewVoucher = { vId ->
+                                        viewingVoucherDetails = journalEntries.find { it.id == vId }
                                     }
                                 )
                             } else {
@@ -450,6 +467,96 @@ fun AccountingScreen(
                 }
             )
         }
+
+        fullEditingVoucher?.let { voucher ->
+            com.example.ui.components.EditFullVoucherDialog(
+                voucher = voucher,
+                subsidiaries = subsidiaries,
+                parties = parties,
+                onDismiss = { fullEditingVoucher = null },
+                onLoadItems = { vId -> viewModel.getVoucherItems(vId) },
+                onSave = { newDesc, newDate, items ->
+                    viewModel.updateFullJournalVoucher(voucher, newDesc, newDate, items) {
+                        fullEditingVoucher = null
+                    }
+                }
+            )
+        }
+
+        editingGeneralAccount?.let { gen ->
+            com.example.ui.components.EditGeneralAccountDialog(
+                account = gen,
+                onDismiss = { editingGeneralAccount = null },
+                onConfirm = { updated ->
+                    viewModel.updateGeneralAccount(updated) {
+                        editingGeneralAccount = null
+                    }
+                }
+            )
+        }
+
+        deletingGeneralAccount?.let { gen ->
+            AlertDialog(
+                onDismissRequest = { deletingGeneralAccount = null },
+                title = { Text("حذف حساب کل", fontWeight = FontWeight.Bold, color = AccountingCreditRed) },
+                text = { Text("آیا از حذف حساب کل «${gen.title}» (کد ${NumberFormatUtils.toPersianDigits(gen.code)}) اطمینان دارید؟ توجه: اگر حساب دارای حساب‌های معین یا گردش باشد، حذف نخواهد شد.") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.deleteGeneralAccount(gen) {
+                                deletingGeneralAccount = null
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccountingCreditRed)
+                    ) {
+                        Text("حذف قطعی", color = Color.White)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { deletingGeneralAccount = null }) {
+                        Text("انصراف")
+                    }
+                }
+            )
+        }
+
+        editingSubsidiaryAccount?.let { sub ->
+            com.example.ui.components.EditSubsidiaryAccountDialog(
+                account = sub,
+                generals = generals,
+                onDismiss = { editingSubsidiaryAccount = null },
+                onConfirm = { updated ->
+                    viewModel.updateSubsidiaryAccount(updated) {
+                        editingSubsidiaryAccount = null
+                    }
+                }
+            )
+        }
+
+        deletingSubsidiaryAccount?.let { sub ->
+            AlertDialog(
+                onDismissRequest = { deletingSubsidiaryAccount = null },
+                title = { Text("حذف حساب معین", fontWeight = FontWeight.Bold, color = AccountingCreditRed) },
+                text = { Text("آیا از حذف حساب معین «${sub.title}» (کد ${NumberFormatUtils.toPersianDigits(sub.code)}) اطمینان دارید؟ در صورت وجود گردش مالی یا آرتیکل ثبت شده، امکان حذف وجود نخواهد داشت.") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.deleteSubsidiaryAccount(sub) {
+                                deletingSubsidiaryAccount = null
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccountingCreditRed)
+                    ) {
+                        Text("حذف قطعی", color = Color.White)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { deletingSubsidiaryAccount = null }) {
+                        Text("انصراف")
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -464,6 +571,10 @@ private fun AccountTreeContent(
     trialBalance: List<TrialBalanceRow>,
     onAddGeneral: () -> Unit,
     onAddSubsidiary: () -> Unit,
+    onEditGeneral: (GeneralAccountEntity) -> Unit = {},
+    onDeleteGeneral: (GeneralAccountEntity) -> Unit = {},
+    onEditSubsidiary: (SubsidiaryAccountEntity) -> Unit = {},
+    onDeleteSubsidiary: (SubsidiaryAccountEntity) -> Unit = {},
     onOpenLedger: (Int) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
@@ -730,11 +841,25 @@ private fun AccountTreeContent(
                                                     color = TextDarkPrimary
                                                 )
                                             }
-                                            Text(
-                                                text = "${NumberFormatUtils.toPersianDigits(genSubs.size)} معین",
-                                                fontSize = 10.sp,
-                                                color = TextDarkSecondary
-                                            )
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                Text(
+                                                    text = "${NumberFormatUtils.toPersianDigits(genSubs.size)} معین",
+                                                    fontSize = 10.sp,
+                                                    color = TextDarkSecondary
+                                                )
+                                                IconButton(
+                                                    onClick = { onEditGeneral(gen) },
+                                                    modifier = Modifier.size(24.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Edit, contentDescription = "ویرایش حساب کل", tint = NavyPrimary, modifier = Modifier.size(13.dp))
+                                                }
+                                                IconButton(
+                                                    onClick = { onDeleteGeneral(gen) },
+                                                    modifier = Modifier.size(24.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Delete, contentDescription = "حذف حساب کل", tint = AccountingCreditRed, modifier = Modifier.size(13.dp))
+                                                }
+                                            }
                                         }
 
                                         // حساب‌های معین زیرمجموعه
@@ -783,6 +908,18 @@ private fun AccountTreeContent(
                                                                         modifier = Modifier.height(26.dp)
                                                                     ) {
                                                                         Text("دفتر معین", fontSize = 9.sp, color = NavyPrimary, fontWeight = FontWeight.Bold)
+                                                                    }
+                                                                    IconButton(
+                                                                        onClick = { onEditSubsidiary(sub) },
+                                                                        modifier = Modifier.size(24.dp)
+                                                                    ) {
+                                                                        Icon(Icons.Default.Edit, contentDescription = "ویرایش معین", tint = NavyPrimary, modifier = Modifier.size(13.dp))
+                                                                    }
+                                                                    IconButton(
+                                                                        onClick = { onDeleteSubsidiary(sub) },
+                                                                        modifier = Modifier.size(24.dp)
+                                                                    ) {
+                                                                        Icon(Icons.Default.Delete, contentDescription = "حذف معین", tint = AccountingCreditRed, modifier = Modifier.size(13.dp))
                                                                     }
                                                                 }
                                                             }
@@ -842,6 +979,7 @@ private fun JournalEntriesContent(
     onVoidVoucher: (JournalEntryEntity) -> Unit,
     onApproveVoucher: (JournalEntryEntity) -> Unit,
     onUpdateVoucher: (JournalEntryEntity, String, String) -> Unit,
+    onFullEditVoucher: (JournalEntryEntity) -> Unit = {},
     onDeleteVoucher: (Long) -> Unit,
     onViewDetails: (JournalEntryEntity) -> Unit
 ) {
@@ -1392,7 +1530,7 @@ private fun JournalEntriesContent(
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     if (!isVoid) {
                                         OutlinedButton(
-                                            onClick = { editingVoucher = entry },
+                                            onClick = { onFullEditVoucher(entry) },
                                             shape = RoundedCornerShape(8.dp),
                                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                                             border = BorderStroke(1.dp, NavyPrimary.copy(alpha = 0.4f)),
@@ -1400,7 +1538,7 @@ private fun JournalEntriesContent(
                                         ) {
                                             Icon(Icons.Default.Edit, contentDescription = null, tint = NavyPrimary, modifier = Modifier.size(14.dp))
                                             Spacer(modifier = Modifier.width(3.dp))
-                                            Text("ویرایش", fontSize = 11.sp, color = NavyPrimary)
+                                            Text("ویرایش کامل", fontSize = 11.sp, color = NavyPrimary)
                                         }
                                         OutlinedButton(
                                             onClick = { voidingVoucher = entry },
