@@ -259,38 +259,69 @@ class AccountingRepository(
             val items = dao.getJournalItemsByVoucherSync(voucherId)
             val partyDao = appDatabase?.partyDao()
             val expenseDao = appDatabase?.expenseAndIncomeDao()
-            val affectedPartyIds = items.mapNotNull { it.partyId }.distinct()
+            val treasuryDao = appDatabase?.treasuryDao()
 
-            // Revert party balances if the voucher was active
-            if (entry.status != "VOID" && partyDao != null) {
-                items.forEach { itm ->
-                    if (itm.partyId != null) {
-                        val net = itm.debit - itm.credit
-                        if (net != 0L) {
-                            partyDao.updatePartyBalance(itm.partyId, -net)
+            // ۱. پاکسازی رکوردهای وابسته به سند در جدول هزینه‌ها و درآمدها و برگشت مانده خزانه‌داری
+            var hasHandledTreasury = false
+            if (expenseDao != null && treasuryDao != null) {
+                val linkedExpenses = expenseDao.getExpensesByVoucherId(voucherId)
+                if (linkedExpenses.isNotEmpty()) {
+                    hasHandledTreasury = true
+                    linkedExpenses.forEach { exp ->
+                        if (exp.paymentMethod == "CASH" && exp.cashDeskId != null) {
+                            treasuryDao.updateCashBalance(exp.cashDeskId, exp.amount)
+                        } else if (exp.paymentMethod == "BANK" && exp.bankAccountId != null) {
+                            treasuryDao.updateBankBalance(exp.bankAccountId, exp.amount)
                         }
+                        expenseDao.deleteExpense(exp)
+                    }
+                }
+
+                val linkedIncomes = expenseDao.getIncomesByVoucherId(voucherId)
+                if (linkedIncomes.isNotEmpty()) {
+                    hasHandledTreasury = true
+                    linkedIncomes.forEach { inc ->
+                        if (inc.depositMethod == "CASH" && inc.cashDeskId != null) {
+                            treasuryDao.updateCashBalance(inc.cashDeskId, -inc.amount)
+                        } else if (inc.depositMethod == "BANK" && inc.bankAccountId != null) {
+                            treasuryDao.updateBankBalance(inc.bankAccountId, -inc.amount)
+                        }
+                        expenseDao.deleteIncome(inc)
                     }
                 }
             }
 
-            // Unlink from expenses and incomes if connected
-            if (expenseDao != null) {
-                expenseDao.unlinkVoucherFromExpenses(voucherId)
-                expenseDao.unlinkVoucherFromIncomes(voucherId)
+            // ۲. اگر سند انتقال یا مستقیم نقدی بوده و خارج از جدول هزینه/درآمد است، اثر خزانه‌داری آن معکوس می‌شود
+            if (!hasHandledTreasury && entry.status != "VOID" && treasuryDao != null) {
+                val cashItems = items.filter { it.subsidiaryCode == 10101 }
+                val bankItems = items.filter { it.subsidiaryCode == 10102 }
+
+                cashItems.forEach { ci ->
+                    val delta = ci.debit - ci.credit
+                    if (delta != 0L) {
+                        val firstCash = treasuryDao.getFirstCashDesk()
+                        if (firstCash != null) treasuryDao.updateCashBalance(firstCash.id, -delta)
+                    }
+                }
+
+                bankItems.forEach { bi ->
+                    val delta = bi.debit - bi.credit
+                    if (delta != 0L) {
+                        val firstBank = treasuryDao.getFirstBankAccount()
+                        if (firstBank != null) treasuryDao.updateBankBalance(firstBank.id, -delta)
+                    }
+                }
             }
 
+            // ۳. حذف قطعی سطرهای آرتیکل و هدر سند حسابداری
             dao.deleteJournalItemsByVoucher(voucherId)
             dao.deleteJournalEntry(entry)
 
-            // Recalculate party balances from ground truth non-void vouchers
-            if (partyDao != null) {
-                affectedPartyIds.forEach { partyId ->
-                    try {
-                        partyDao.recalculatePartyBalance(partyId)
-                    } catch (e: Exception) {
-                        // ignore
-                    }
-                }
+            // ۴. محاسبه مجدد قطعی مانده حساب تمامی اشخاص بر مبنای اسناد رسمی معتبر بدون هیچ‌گونه خطا یا داده یتیم
+            try {
+                partyDao?.recalculateAllPartyBalances()
+            } catch (e: Exception) {
+                android.util.Log.e("AccountingRepository", "Error recalculating party balances after voucher deletion", e)
             }
         }
     }

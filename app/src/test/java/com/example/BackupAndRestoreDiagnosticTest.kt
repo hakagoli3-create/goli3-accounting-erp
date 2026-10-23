@@ -26,11 +26,17 @@ class BackupAndRestoreDiagnosticTest {
     @org.junit.Before
     fun setUp() {
         AppDatabase.closeInstance()
+        AppSecurityAndSettingsManager.resetInstance()
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("goli_erp_settings", Context.MODE_PRIVATE).edit().clear().commit()
     }
 
     @org.junit.After
     fun tearDown() {
         AppDatabase.closeInstance()
+        AppSecurityAndSettingsManager.resetInstance()
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("goli_erp_settings", Context.MODE_PRIVATE).edit().clear().commit()
     }
 
     @Test

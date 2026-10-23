@@ -495,26 +495,46 @@ fun DashboardScreen(
                         )
                     }
 
-                    // ردیف دوم کارت‌های آماری: مطالبات و هزینه‌ها
+                    // ردیف دوم کارت‌های آماری: تفکیک دقیق مطالبات مشتریان و بدهی تامین‌کنندگان
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // ۳. مطالبات (طلب از مشتریان)
+                        // ۳. مطالبات از مشتریان
                         StatGridCard(
                             modifier = Modifier
                                 .weight(1f)
-                                .testTag("metric_receivables"),
+                                .testTag("metric_customer_receivables"),
                             title = "مطالبات از مشتریان",
-                            value = NumberFormatUtils.formatPrice(state.totalReceivables),
-                            subtitle = "مانده بدهکاری اشخاص",
+                            value = NumberFormatUtils.formatPrice(state.customerReceivables),
+                            subtitle = "طلب تجاری از خریداران",
                             icon = Icons.Default.TrendingUp,
                             iconTint = StatusInfoBlue,
                             badgeColor = StatusInfoBlue.copy(alpha = 0.12f),
                             onClick = { onNavigateToRoute("crm") }
                         )
 
-                        // ۴. هزینه‌ها
+                        // ۴. بدهی به تامین‌کنندگان
+                        StatGridCard(
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("metric_supplier_payables"),
+                            title = "بدهی به تامین‌کنندگان",
+                            value = NumberFormatUtils.formatPrice(state.supplierPayables),
+                            subtitle = "تعهد پرداخت به بستانکاران",
+                            icon = Icons.Default.TrendingDown,
+                            iconTint = AccountingCreditRed,
+                            badgeColor = AccountingCreditRed.copy(alpha = 0.12f),
+                            onClick = { onNavigateToRoute("crm") }
+                        )
+                    }
+
+                    // ردیف سوم کارت‌های آماری: هزینه‌ها و مانده کل اشخاص
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // ۵. هزینه‌های ثبت‌شده
                         StatGridCard(
                             modifier = Modifier
                                 .weight(1f)
@@ -522,10 +542,24 @@ fun DashboardScreen(
                             title = "هزینه‌های ثبت‌شده",
                             value = NumberFormatUtils.formatPrice(state.todayExpenses),
                             subtitle = "کل دوره: ${NumberFormatUtils.formatPrice(state.totalExpenses)}",
-                            icon = Icons.Default.TrendingDown,
-                            iconTint = AccountingCreditRed,
-                            badgeColor = AccountingCreditRed.copy(alpha = 0.12f),
+                            icon = Icons.Default.AccountBalanceWallet,
+                            iconTint = MatteGold,
+                            badgeColor = MatteGold.copy(alpha = 0.15f),
                             onClick = { onNavigateToRoute("expenses") }
+                        )
+
+                        // ۶. کل مطالبات بازار
+                        StatGridCard(
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("metric_receivables"),
+                            title = "کل مطالبات اشخاص",
+                            value = NumberFormatUtils.formatPrice(state.totalReceivables),
+                            subtitle = "کل تعهدات: ${NumberFormatUtils.formatPrice(state.totalPayables)}",
+                            icon = Icons.Default.People,
+                            iconTint = NavyPrimary,
+                            badgeColor = NavyPrimary.copy(alpha = 0.12f),
+                            onClick = { onNavigateToRoute("crm") }
                         )
                     }
                 }

@@ -93,11 +93,23 @@ interface TreasuryDao {
     @Delete
     suspend fun deleteCheque(cheque: ChequeEntity)
 
+    @Query("SELECT * FROM cheques WHERE id = :id LIMIT 1")
+    suspend fun getChequeById(id: Long): ChequeEntity?
+
+    @Query("DELETE FROM cheques WHERE id = :id")
+    suspend fun deleteChequeById(id: Long): Int
+
     @Query("DELETE FROM cheques WHERE notes LIKE '%' || :invoiceNumber || '%'")
     suspend fun deleteChequesByInvoiceNumber(invoiceNumber: String): Int
 
     @Query("SELECT * FROM cheques WHERE notes LIKE '%' || :invoiceNumber || '%' LIMIT 1")
     suspend fun getChequeByInvoiceNumber(invoiceNumber: String): ChequeEntity?
+
+    @Query("DELETE FROM cheques WHERE notes LIKE '%' || :query || '%' OR sayadNumber = :query OR chequeNumber = :query")
+    suspend fun deleteChequesByQuery(query: String): Int
+
+    @Query("SELECT * FROM cheques WHERE notes LIKE '%' || :query || '%' OR sayadNumber = :query OR chequeNumber = :query")
+    suspend fun getChequesByQuery(query: String): List<ChequeEntity>
 
     // Multi-Currency Balances for Cash Desks and Bank Accounts
     @Query("SELECT * FROM treasury_currency_balances ORDER BY currencyCode ASC")

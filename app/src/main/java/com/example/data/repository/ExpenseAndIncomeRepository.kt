@@ -162,27 +162,35 @@ class ExpenseAndIncomeRepository(
 
         // ۲. حذف کامل سند حسابداری متصل و تمام آرتیکل‌های آن (حذف قطعی رکوردهای یتیم)
         var affectedPartyId: Long? = null
-        expense.voucherId?.let { vId ->
+        if (expense.voucherId != null) {
             try {
-                val items = accountingDao.getJournalItemsByVoucherSync(vId)
+                val items = accountingDao.getJournalItemsByVoucherSync(expense.voucherId)
                 affectedPartyId = items.firstOrNull { it.partyId != null }?.partyId
-                accountingDao.deleteJournalItemsByVoucher(vId)
-                accountingDao.deleteJournalEntryById(vId)
+                accountingDao.deleteJournalItemsByVoucher(expense.voucherId)
+                accountingDao.deleteJournalEntryById(expense.voucherId)
             } catch (e: Exception) {
-                android.util.Log.e("ExpenseAndIncomeRepo", "Error deleting voucher $vId for expense", e)
+                android.util.Log.e("ExpenseAndIncomeRepo", "Error deleting voucher ${expense.voucherId} for expense", e)
+            }
+        } else if (expense.title.isNotBlank()) {
+            try {
+                accountingDao.deleteJournalItemsByDescriptionPattern(expense.title)
+                accountingDao.deleteJournalEntriesByDescriptionPattern(expense.title)
+            } catch (e: Exception) {
+                // Ignore pattern cleanup
             }
         }
 
         // ۳. حذف رکورد هزینه
         expenseAndIncomeDao.deleteExpense(expense)
 
-        // ۴. محاسبه مجدد مانده طرف‌حساب در صورت وجود آرتیکل شخص
-        if (affectedPartyId != null) {
-            try {
+        // ۴. محاسبه مجدد و قطعی مانده حساب تمامی طرف‌حساب‌ها
+        try {
+            if (affectedPartyId != null) {
                 appDatabase?.partyDao()?.recalculatePartyBalance(affectedPartyId!!)
-            } catch (e: Exception) {
-                android.util.Log.e("ExpenseAndIncomeRepo", "Error recalculating party balance", e)
             }
+            appDatabase?.partyDao()?.recalculateAllPartyBalances()
+        } catch (e: Exception) {
+            android.util.Log.e("ExpenseAndIncomeRepo", "Error recalculating party balances after deleteExpense", e)
         }
     }
 
@@ -328,27 +336,35 @@ class ExpenseAndIncomeRepository(
 
         // ۲. حذف کامل سند حسابداری متصل و تمام آرتیکل‌های آن (حذف قطعی رکوردهای یتیم)
         var affectedPartyId: Long? = null
-        income.voucherId?.let { vId ->
+        if (income.voucherId != null) {
             try {
-                val items = accountingDao.getJournalItemsByVoucherSync(vId)
+                val items = accountingDao.getJournalItemsByVoucherSync(income.voucherId)
                 affectedPartyId = items.firstOrNull { it.partyId != null }?.partyId
-                accountingDao.deleteJournalItemsByVoucher(vId)
-                accountingDao.deleteJournalEntryById(vId)
+                accountingDao.deleteJournalItemsByVoucher(income.voucherId)
+                accountingDao.deleteJournalEntryById(income.voucherId)
             } catch (e: Exception) {
-                android.util.Log.e("ExpenseAndIncomeRepo", "Error deleting voucher $vId for income", e)
+                android.util.Log.e("ExpenseAndIncomeRepo", "Error deleting voucher ${income.voucherId} for income", e)
+            }
+        } else if (income.title.isNotBlank()) {
+            try {
+                accountingDao.deleteJournalItemsByDescriptionPattern(income.title)
+                accountingDao.deleteJournalEntriesByDescriptionPattern(income.title)
+            } catch (e: Exception) {
+                // Ignore pattern cleanup
             }
         }
 
         // ۳. حذف رکورد درآمد
         expenseAndIncomeDao.deleteIncome(income)
 
-        // ۴. محاسبه مجدد مانده طرف‌حساب در صورت وجود آرتیکل شخص
-        if (affectedPartyId != null) {
-            try {
+        // ۴. محاسبه مجدد و قطعی مانده حساب تمامی طرف‌حساب‌ها
+        try {
+            if (affectedPartyId != null) {
                 appDatabase?.partyDao()?.recalculatePartyBalance(affectedPartyId!!)
-            } catch (e: Exception) {
-                android.util.Log.e("ExpenseAndIncomeRepo", "Error recalculating party balance", e)
             }
+            appDatabase?.partyDao()?.recalculateAllPartyBalances()
+        } catch (e: Exception) {
+            android.util.Log.e("ExpenseAndIncomeRepo", "Error recalculating party balances after deleteIncome", e)
         }
     }
 }

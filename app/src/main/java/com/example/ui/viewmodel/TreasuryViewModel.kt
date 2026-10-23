@@ -326,11 +326,52 @@ class TreasuryViewModel(
     fun deleteCheque(cheque: ChequeEntity, onSuccess: () -> Unit = {}) {
         viewModelScope.launch {
             try {
-                repository.deleteCheque(cheque)
-                _statusMessage.value = "چک با موفقیت حذف گردید."
+                repository.deleteChequeCascading(cheque)
+                _statusMessage.value = "چک صیادی و کلیه اسناد و وابستگی‌های آن با موفقیت پاکسازی شد."
                 onSuccess()
             } catch (e: Exception) {
-                _statusMessage.value = "امکان حذف این چک وجود ندارد."
+                _statusMessage.value = "خطا در حذف چک: ${e.localizedMessage}"
+            }
+        }
+    }
+
+    /**
+     * حذف اتمیک و زنجیره‌ای هر نوع تراکنش خزانه‌داری (دریافت، پرداخت، انتقال) به همراه پاکسازی کلیه اسناد دوبل و مانده‌ها
+     */
+    fun deleteTreasuryTransaction(transaction: TreasuryTransaction, onSuccess: () -> Unit = {}) {
+        viewModelScope.launch {
+            try {
+                when {
+                    transaction.id.startsWith("INC-") -> {
+                        val id = transaction.id.removePrefix("INC-").toLongOrNull()
+                        if (id != null) {
+                            val inc = expenseRepo.getIncomeById(id)
+                            if (inc != null) {
+                                expenseRepo.deleteIncome(inc)
+                            }
+                        }
+                    }
+                    transaction.id.startsWith("EXP-") -> {
+                        val id = transaction.id.removePrefix("EXP-").toLongOrNull()
+                        if (id != null) {
+                            val exp = expenseRepo.getExpenseById(id)
+                            if (exp != null) {
+                                expenseRepo.deleteExpense(exp)
+                            }
+                        }
+                    }
+                    transaction.id.startsWith("VOUCH-") -> {
+                        val id = transaction.id.removePrefix("VOUCH-").toLongOrNull()
+                        if (id != null) {
+                            accountingRepo.deleteVoucher(id)
+                        }
+                    }
+                }
+                partyRepo.recalculateAllPartyBalances()
+                _statusMessage.value = "تراکنش خزانه‌داری با موفقیت به صورت اتمیک و زنجیره‌ای پاکسازی شد."
+                onSuccess()
+            } catch (e: Exception) {
+                _statusMessage.value = "خطا در حذف تراکنش: ${e.localizedMessage}"
             }
         }
     }
@@ -453,7 +494,8 @@ class TreasuryViewModel(
                         repository.updateBankBalance(targetId, amount)
                     }
 
-                    partyRepo.updatePartyBalance(partyId, -amount)
+                    partyRepo.recalculatePartyBalance(partyId)
+                    partyRepo.recalculateAllPartyBalances()
 
                     expenseRepo.insertDirectIncome(
                         IncomeEntity(
@@ -571,7 +613,8 @@ class TreasuryViewModel(
                         repository.updateBankBalance(sourceId, -amount)
                     }
 
-                    partyRepo.updatePartyBalance(partyId, amount)
+                    partyRepo.recalculatePartyBalance(partyId)
+                    partyRepo.recalculateAllPartyBalances()
 
                     expenseRepo.insertDirectExpense(
                         ExpenseEntity(
@@ -686,7 +729,8 @@ class TreasuryViewModel(
                             ),
                             items
                         )
-                        partyRepo.updatePartyBalance(partyId, -amount)
+                        partyRepo.recalculatePartyBalance(partyId)
+                        partyRepo.recalculateAllPartyBalances()
                     } else {
                         val items = listOf(
                             JournalItemEntity(
@@ -718,7 +762,8 @@ class TreasuryViewModel(
                             ),
                             items
                         )
-                        partyRepo.updatePartyBalance(partyId, amount)
+                        partyRepo.recalculatePartyBalance(partyId)
+                        partyRepo.recalculateAllPartyBalances()
                     }
                 }
 
@@ -868,7 +913,8 @@ class TreasuryViewModel(
                             ),
                             items
                         )
-                        partyRepo.updatePartyBalance(cheque.partyId, cheque.amount)
+                        partyRepo.recalculatePartyBalance(cheque.partyId)
+                        partyRepo.recalculateAllPartyBalances()
                     } else {
                         val items = listOf(
                             JournalItemEntity(
@@ -900,7 +946,8 @@ class TreasuryViewModel(
                             ),
                             items
                         )
-                        partyRepo.updatePartyBalance(cheque.partyId, -cheque.amount)
+                        partyRepo.recalculatePartyBalance(cheque.partyId)
+                        partyRepo.recalculateAllPartyBalances()
                     }
                 }
 

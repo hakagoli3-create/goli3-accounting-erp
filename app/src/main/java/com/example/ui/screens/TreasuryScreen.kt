@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.TrendingDown
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -174,6 +175,7 @@ fun TreasuryScreen(
     var showExpenseDialog by remember { mutableStateOf(false) }
     var showTransferDialog by remember { mutableStateOf(false) }
     var showCapitalDialog by remember { mutableStateOf(false) }
+    var transactionToDelete by remember { mutableStateOf<TreasuryTransaction?>(null) }
 
     val safeTotalCash = totalCash ?: 0L
     val safeTotalBank = totalBank ?: 0L
@@ -384,7 +386,8 @@ fun TreasuryScreen(
                             onTypeFilterSelect = { viewModel.setTypeFilter(it) },
                             onOpenIncome = { showIncomeDialog = true },
                             onOpenExpense = { showExpenseDialog = true },
-                            onOpenTransfer = { showTransferDialog = true }
+                            onOpenTransfer = { showTransferDialog = true },
+                            onDeleteTransaction = { tx -> transactionToDelete = tx }
                         )
                         2 -> ChequesContent(
                             cheques = cheques,
@@ -631,6 +634,42 @@ fun TreasuryScreen(
                 onConfirm = { investor, amount, destType, targetId ->
                     viewModel.registerCapitalInvestment(investor, amount, destType, targetId) {
                         showCapitalDialog = false
+                    }
+                }
+            )
+        }
+
+        transactionToDelete?.let { tx ->
+            AlertDialog(
+                onDismissRequest = { transactionToDelete = null },
+                title = {
+                    Text(
+                        text = "حذف تراکنش و پاکسازی زنجیره‌ای",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                },
+                text = {
+                    Text(
+                        text = "آیا از حذف تراکنش «${tx.title}» به مبلغ «${NumberFormatUtils.formatPrice(tx.amount)}» اطمینان دارید؟\n\nکلیه اسناد دوبل حسابداری متناظر، مانده صندوق یا بانک، و مانده حساب طرف‌حساب به صورت اتمیک و زنجیره‌ای اصلاح خواهند شد.",
+                        fontSize = 13.sp,
+                        lineHeight = 22.sp
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.deleteTreasuryTransaction(tx)
+                            transactionToDelete = null
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccountingCreditRed)
+                    ) {
+                        Text("حذف و پاکسازی کامل", color = Color.White)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { transactionToDelete = null }) {
+                        Text("انصراف")
                     }
                 }
             )
@@ -1082,7 +1121,8 @@ private fun TransactionsAndTurnoverContent(
     onTypeFilterSelect: (TransactionType?) -> Unit,
     onOpenIncome: () -> Unit,
     onOpenExpense: () -> Unit,
-    onOpenTransfer: () -> Unit
+    onOpenTransfer: () -> Unit,
+    onDeleteTransaction: (TreasuryTransaction) -> Unit
 ) {
     val totalInflow = remember(transactions) {
         transactions.filter { it.type == TransactionType.INFLOW }.sumOf { it.amount }
@@ -1315,7 +1355,10 @@ private fun TransactionsAndTurnoverContent(
             }
         } else {
             items(transactions, key = { "tx_${it.id}" }) { tx ->
-                TransactionCardItem(transaction = tx)
+                TransactionCardItem(
+                    transaction = tx,
+                    onDelete = { onDeleteTransaction(tx) }
+                )
             }
         }
     }
@@ -1325,7 +1368,10 @@ private fun TransactionsAndTurnoverContent(
  * آیتم تراکنش در گردش حساب
  */
 @Composable
-private fun TransactionCardItem(transaction: TreasuryTransaction) {
+private fun TransactionCardItem(
+    transaction: TreasuryTransaction,
+    onDelete: () -> Unit
+) {
     val isIncome = transaction.type == TransactionType.INFLOW
     val isTransfer = transaction.type == TransactionType.TRANSFER
 
@@ -1409,23 +1455,41 @@ private fun TransactionCardItem(transaction: TreasuryTransaction) {
                 }
             }
 
-            Column(horizontalAlignment = Alignment.End) {
-                if (transaction.amount > 0) {
-                    Text(
-                        text = (if (isIncome) "+" else "-") + NumberFormatUtils.formatPrice(transaction.amount),
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = FontWeight.ExtraBold,
-                            color = accentColor,
-                            fontSize = 13.sp
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(horizontalAlignment = Alignment.End) {
+                    if (transaction.amount > 0) {
+                        Text(
+                            text = (if (isIncome) "+" else "-") + NumberFormatUtils.formatPrice(transaction.amount),
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.ExtraBold,
+                                color = accentColor,
+                                fontSize = 13.sp
+                            )
                         )
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = NumberFormatUtils.toPersianDigits(transaction.jalaliDate),
+                        fontSize = 10.sp,
+                        color = TextDarkSecondary
                     )
                 }
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = NumberFormatUtils.toPersianDigits(transaction.jalaliDate),
-                    fontSize = 10.sp,
-                    color = TextDarkSecondary
-                )
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .testTag("delete_tx_${transaction.id}")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DeleteOutline,
+                        contentDescription = "حذف تراکنش",
+                        tint = AccountingCreditRed.copy(alpha = 0.8f),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
     }

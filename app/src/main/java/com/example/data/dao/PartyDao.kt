@@ -57,10 +57,10 @@ interface PartyDao {
     @Query("SELECT COALESCE(SUM(currentBalance), 0) FROM parties WHERE partyType IN ('SUPPLIER', 'BOTH') AND currentBalance > 0")
     fun getSupplierReceivables(): Flow<Long>
 
-    @Query("SELECT COALESCE(SUM(currentBalance), 0) FROM parties WHERE partyType IN ('CUSTOMER', 'BOTH') AND currentBalance > 0")
+    @Query("SELECT COALESCE(SUM(currentBalance), 0) FROM parties WHERE currentBalance > 0")
     fun getTotalReceivables(): Flow<Long>
 
-    @Query("SELECT COALESCE(SUM(ABS(currentBalance)), 0) FROM parties WHERE partyType IN ('SUPPLIER', 'BOTH') AND currentBalance < 0")
+    @Query("SELECT COALESCE(SUM(ABS(currentBalance)), 0) FROM parties WHERE currentBalance < 0")
     fun getTotalPayables(): Flow<Long>
 
     @Query("""

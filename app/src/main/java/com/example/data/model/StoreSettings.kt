@@ -558,5 +558,11 @@ class AppSecurityAndSettingsManager(private val context: Context) {
                 inst
             }
         }
+
+        fun resetInstance() {
+            synchronized(this) {
+                INSTANCE = null
+            }
+        }
     }
 }

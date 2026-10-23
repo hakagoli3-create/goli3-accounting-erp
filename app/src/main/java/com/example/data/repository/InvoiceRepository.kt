@@ -1057,6 +1057,8 @@ class InvoiceRepository(
             try {
                 accountingDao.deleteJournalItemsByDescriptionPattern(invoice.invoiceNumber)
                 accountingDao.deleteJournalEntriesByDescriptionPattern(invoice.invoiceNumber)
+                accountingDao.deleteJournalItemsByDescriptionPattern("REV-${invoice.invoiceNumber}")
+                accountingDao.deleteJournalEntriesByDescriptionPattern("REV-${invoice.invoiceNumber}")
             } catch (e: Exception) {
                 android.util.Log.e("InvoiceRepository", "Error removing journal vouchers for deleted invoice ${invoice.invoiceNumber}", e)
             }
@@ -1076,13 +1078,14 @@ class InvoiceRepository(
                 1
             }
 
-            // ۷. محاسبه مجدد و قطعی مانده حساب طرف‌حساب از روی دفاتر حسابداری فعال (Zero Drift)
-            if (invoice.partyId != null) {
-                try {
+            // ۷. محاسبه مجدد و قطعی مانده حساب طرف‌حساب‌ها از روی دفاتر حسابداری فعال (Zero Drift)
+            try {
+                if (invoice.partyId != null) {
                     partyDao.recalculatePartyBalance(invoice.partyId)
-                } catch (e: Exception) {
-                    android.util.Log.e("InvoiceRepository", "Error recalculating party balance after delete invoice", e)
                 }
+                partyDao.recalculateAllPartyBalances()
+            } catch (e: Exception) {
+                android.util.Log.e("InvoiceRepository", "Error recalculating party balances after delete invoice", e)
             }
 
             rowsDeleted > 0

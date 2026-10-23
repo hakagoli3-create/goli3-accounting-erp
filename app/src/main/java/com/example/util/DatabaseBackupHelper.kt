@@ -61,10 +61,11 @@ object DatabaseBackupHelper {
         try {
             Log.i(TAG, "Starting database backup creation...")
 
-            // ۱. اطمینان از ذخیره قطعی و بلادرنگ مشخصات فروشگاه و ارزها در جدول اختصاصی دیتابیس
+            // ۱. اطمینان از مقداردهی قطعی فایل دیتابیس و ذخیره بلادرنگ مشخصات فروشگاه در دیتابیس
+            val appDb = AppDatabase.getInstance(context)
+            val writableDb = appDb.openHelper.writableDatabase
             try {
                 val secManager = com.example.data.model.AppSecurityAndSettingsManager.getInstance(context)
-                val appDb = AppDatabase.getInstance(context)
                 secManager.syncProfileToDatabase(appDb)
             } catch (e: Exception) {
                 Log.w(TAG, "Warning syncing profile to DB before backup: ${e.localizedMessage}")
@@ -72,14 +73,10 @@ object DatabaseBackupHelper {
 
             // ۲. فلاش کردن تمام صفحات معلق لاگ WAL به فایل اصلی با دستور PRAGMA wal_checkpoint(TRUNCATE)
             try {
-                val appDb = AppDatabase.getInstance(context)
-                if (appDb.isOpen) {
-                    val db = appDb.openHelper.writableDatabase
-                    val cursor = db.query("PRAGMA wal_checkpoint(TRUNCATE)")
-                    cursor.moveToFirst()
-                    cursor.close()
-                    Log.d(TAG, "WAL checkpoint TRUNCATE executed successfully before backup.")
-                }
+                val cursor = writableDb.query("PRAGMA wal_checkpoint(TRUNCATE)")
+                cursor.moveToFirst()
+                cursor.close()
+                Log.d(TAG, "WAL checkpoint TRUNCATE executed successfully before backup.")
             } catch (e: Exception) {
                 Log.w(TAG, "Warning during WAL checkpoint: ${e.localizedMessage}")
             }

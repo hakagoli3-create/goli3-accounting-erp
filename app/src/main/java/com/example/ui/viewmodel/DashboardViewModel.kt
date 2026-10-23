@@ -22,6 +22,8 @@ data class DashboardUiState(
     val totalBankBalance: Long = 0L,
     val totalReceivables: Long = 0L,
     val totalPayables: Long = 0L,
+    val customerReceivables: Long = 0L,
+    val supplierPayables: Long = 0L,
     val todayExpenses: Long = 0L,
     val totalExpenses: Long = 0L,
     val lowStockCount: Int = 0,
@@ -35,7 +37,12 @@ data class DashboardUiState(
 private data class SalesStats(val todaySales: Long, val todayInvoices: Int, val totalSales: Long)
 private data class TreasuryStats(val cash: Long, val bank: Long)
 private data class AlertStats(val lowStock: Int, val dueCheques: Int, val overCredit: Int)
-private data class PartyStats(val receivables: Long, val payables: Long)
+private data class PartyStats(
+    val receivables: Long,
+    val payables: Long,
+    val customerReceivables: Long,
+    val supplierPayables: Long
+)
 private data class ExpenseStats(val todayExpense: Long, val totalExpense: Long)
 
 class DashboardViewModel(
@@ -74,9 +81,11 @@ class DashboardViewModel(
 
     private val partyStats = combine(
         partyRepo.totalReceivables,
-        partyRepo.totalPayables
-    ) { receivables, payables ->
-        PartyStats(receivables, payables)
+        partyRepo.totalPayables,
+        partyRepo.customerReceivables,
+        partyRepo.supplierPayables
+    ) { receivables, payables, custRec, suppPay ->
+        PartyStats(receivables, payables, custRec, suppPay)
     }
 
     private val expenseStats = combine(
@@ -101,6 +110,8 @@ class DashboardViewModel(
             totalBankBalance = treasury.bank,
             totalReceivables = party.receivables,
             totalPayables = party.payables,
+            customerReceivables = party.customerReceivables,
+            supplierPayables = party.supplierPayables,
             todayExpenses = expenses.todayExpense,
             totalExpenses = expenses.totalExpense,
             lowStockCount = alerts.lowStock,

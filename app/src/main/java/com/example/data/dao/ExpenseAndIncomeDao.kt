@@ -59,6 +59,18 @@ interface ExpenseAndIncomeDao {
     @Query("SELECT * FROM expenses WHERE id = :id LIMIT 1")
     suspend fun getExpenseById(id: Long): ExpenseEntity?
 
+    @Query("SELECT * FROM expenses WHERE voucherId = :voucherId")
+    suspend fun getExpensesByVoucherId(voucherId: Long): List<ExpenseEntity>
+
+    @Query("SELECT * FROM incomes WHERE voucherId = :voucherId")
+    suspend fun getIncomesByVoucherId(voucherId: Long): List<IncomeEntity>
+
+    @Query("DELETE FROM expenses WHERE voucherId = :voucherId")
+    suspend fun deleteExpensesByVoucherId(voucherId: Long): Int
+
+    @Query("DELETE FROM incomes WHERE voucherId = :voucherId")
+    suspend fun deleteIncomesByVoucherId(voucherId: Long): Int
+
     @Query("UPDATE expenses SET voucherId = NULL WHERE voucherId = :voucherId")
     suspend fun unlinkVoucherFromExpenses(voucherId: Long)
 

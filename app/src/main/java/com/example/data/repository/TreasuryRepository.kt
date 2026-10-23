@@ -44,7 +44,53 @@ class TreasuryRepository(
 
     suspend fun insertCheque(cheque: ChequeEntity): Long = dao.insertCheque(cheque)
     suspend fun updateCheque(cheque: ChequeEntity) = dao.updateCheque(cheque)
-    suspend fun deleteCheque(cheque: ChequeEntity) = dao.deleteCheque(cheque)
+    suspend fun deleteCheque(cheque: ChequeEntity) = deleteChequeCascading(cheque)
+
+    suspend fun deleteChequeCascading(cheque: ChequeEntity) {
+        if (appDatabase != null) {
+            appDatabase.withTransaction {
+                val accountingDao = appDatabase.accountingDao()
+                val partyDao = appDatabase.partyDao()
+
+                // ۱. پاکسازی کلیه اسناد حسابداری ثبت اولیه، وصول یا برگشت این چک
+                val matchingEntries = accountingDao.getJournalEntriesByDescriptionPattern(cheque.chequeNumber)
+                matchingEntries.forEach { entry ->
+                    accountingDao.deleteJournalItemsByVoucher(entry.id)
+                    accountingDao.deleteJournalEntry(entry)
+                }
+
+                // ۲. در صورتی که چک قبلاً وصول/پاس شده بود، موجودی بانک یا صندوق را معکوس می‌کنیم
+                if (cheque.status == "PASSED") {
+                    if (cheque.type == "RECEIVABLE") {
+                        val firstBank = dao.getFirstBankAccount()
+                        if (firstBank != null) {
+                            dao.updateBankBalance(firstBank.id, -cheque.amount)
+                        }
+                    } else {
+                        val firstBank = dao.getFirstBankAccount()
+                        if (firstBank != null) {
+                            dao.updateBankBalance(firstBank.id, cheque.amount)
+                        }
+                    }
+                }
+
+                // ۳. حذف قطعی چک از جدول cheques
+                dao.deleteCheque(cheque)
+
+                // ۴. محاسبه مجدد قطعی مانده حساب طرف‌حساب و کل اشخاص در CRM
+                try {
+                    if (cheque.partyId != null) {
+                        partyDao.recalculatePartyBalance(cheque.partyId)
+                    }
+                    partyDao.recalculateAllPartyBalances()
+                } catch (e: Exception) {
+                    android.util.Log.e("TreasuryRepo", "Error recalculating party balances after deleteCheque", e)
+                }
+            }
+        } else {
+            dao.deleteCheque(cheque)
+        }
+    }
 
     suspend fun transferBetweenAccounts(
         fromType: String,
