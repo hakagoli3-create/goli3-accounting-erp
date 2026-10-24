@@ -27,6 +27,14 @@ import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.CircularProgressIndicator
+import java.io.File
 import androidx.compose.material.icons.filled.CurrencyExchange
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudSync
@@ -1235,33 +1243,104 @@ private fun BackupAndSyncSection(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var isSyncing by remember { mutableStateOf(false) }
+    var isOperating by remember { mutableStateOf(false) }
+    var operationMessage by remember { mutableStateOf("") }
 
-    val restoreLauncher = rememberLauncherForActivityResult(
+    var existingBackups by remember { mutableStateOf(DatabaseBackupHelper.getExistingBackupFiles(context)) }
+    fun refreshBackups() {
+        existingBackups = DatabaseBackupHelper.getExistingBackupFiles(context)
+    }
+
+    var pendingRestoreUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var pendingRestoreFileName by remember { mutableStateOf<String?>(null) }
+    var fileToDelete by remember { mutableStateOf<File?>(null) }
+    var pendingFileToSave by remember { mutableStateOf<File?>(null) }
+
+    // SAF CreateDocument Launcher to save backup to user's chosen folder
+    val saveToStorageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/x-sqlite3")
+    ) { destinationUri ->
+        if (destinationUri != null && pendingFileToSave != null) {
+            scope.launch {
+                isOperating = true
+                operationMessage = "در حال ذخیره‌سازی فایل پشتیبان در محل انتخابی..."
+                val copyResult = DatabaseBackupHelper.copyBackupToUri(context, pendingFileToSave!!, destinationUri)
+                isOperating = false
+                if (copyResult.isSuccess) {
+                    Toast.makeText(context, "فایل پشتیبان با موفقیت در حافظه ذخیره شد.", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(context, "خطا در ذخیره فایل: ${copyResult.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                }
+                pendingFileToSave = null
+                refreshBackups()
+            }
+        } else {
+            pendingFileToSave = null
+        }
+    }
+
+    // SAF GetContent Launcher to select an external backup file to restore
+    val restorePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) {
-            scope.launch {
-                val result = DatabaseBackupHelper.restoreDatabaseFromFile(context, uri)
-                if (result.isSuccess) {
-                    try {
-                        val appDb = AppDatabase.getInstance(context)
-                        securityManager.reloadFromDatabase(appDb)
-                    } catch (_: Exception) {}
+            val fileName = uri.lastPathSegment?.substringAfterLast('/') ?: "فایل پشتیبان انتخابی"
+            pendingRestoreUri = uri
+            pendingRestoreFileName = fileName
+        }
+    }
 
-                    Toast.makeText(context, "بازیابی اطلاعات با موفقیت انجام شد. تمام سوابق مالی و مشخصات فروشگاه بازیابی شدند. در حال راه‌اندازی مجدد...", Toast.LENGTH_LONG).show()
-                    kotlinx.coroutines.delay(800)
-                    val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-                    if (intent != null) {
-                        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                        context.startActivity(intent)
-                        (context as? android.app.Activity)?.finishAffinity()
-                    } else {
-                        (context as? android.app.Activity)?.recreate()
-                    }
+    // Perform database restore safely
+    fun executeRestore(uri: android.net.Uri) {
+        scope.launch {
+            isOperating = true
+            operationMessage = "در حال بستن پایگاه داده و جایگزینی کامل فایل پشتیبان..."
+            val result = DatabaseBackupHelper.restoreDatabaseFromFile(context, uri)
+            if (result.isSuccess) {
+                try {
+                    val appDb = AppDatabase.getInstance(context)
+                    securityManager.reloadFromDatabase(appDb)
+                } catch (_: Exception) {}
+
+                Toast.makeText(
+                    context,
+                    "بازیابی با موفقیت کامل انجام شد. کلیه فاکتورها، اسناد دوبل، انبار و تنظیمات بازگردانی شدند. در حال راه‌اندازی مجدد...",
+                    Toast.LENGTH_LONG
+                ).show()
+                kotlinx.coroutines.delay(800)
+                val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                if (intent != null) {
+                    intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                    context.startActivity(intent)
+                    (context as? android.app.Activity)?.finishAffinity()
                 } else {
-                    val errorMsg = result.exceptionOrNull()?.message ?: "خطای ناشناخته در بازیابی فایل پشتیبان"
-                    Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
+                    (context as? android.app.Activity)?.recreate()
                 }
+            } else {
+                isOperating = false
+                val errorMsg = result.exceptionOrNull()?.message ?: "خطای ناشناخته در بازیابی فایل پشتیبان"
+                Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    // Operating progress banner
+    if (isOperating) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = operationMessage,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                )
             }
         }
     }
@@ -1278,25 +1357,30 @@ private fun BackupAndSyncSection(
                 Icon(imageVector = Icons.Default.Storage, contentDescription = null, tint = PersianGold)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "پشتیبان‌گیری و بازیابی پایگاه داده (Backup & Restore)",
+                    text = "پشتیبان‌گیری جامع پایگاه داده (Full DB Backup & Restore)",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
             }
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "ایجاد فایل پشتیبان از کلیه حساب‌ها، فاکتورها، انبار، کاربران و اسناد حسابداری بر روی حافظه دستگاه.",
+                text = "پشتیبان‌گیری فیزیکی کامل از فایل پایگاه داده SQLite/Room شامل ۲۲ جدول، کلیه فاکتورها، اسناد دوبل و اقلام VoucherItems، کالاها، انبارها و کاردکس گردش کالا، طرف‌های‌حساب، تراکنش‌های خزانه‌داری، چک‌ها، کاربران و مشخصات فروشگاه.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                lineHeight = 20.sp
             )
 
             Spacer(modifier = Modifier.height(14.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = {
                         scope.launch {
+                            isOperating = true
+                            operationMessage = "در حال ایجاد فایل پشتیبان کامل از دیتابیس..."
                             val result = DatabaseBackupHelper.createDatabaseBackup(context)
+                            isOperating = false
                             if (result.isSuccess) {
                                 val backupFile = result.getOrNull()!!
+                                refreshBackups()
                                 Toast.makeText(context, "فایل پشتیبان ساخته شد: ${backupFile.name}", Toast.LENGTH_SHORT).show()
                                 DatabaseBackupHelper.shareBackupFile(context, backupFile)
                             } else {
@@ -1305,21 +1389,161 @@ private fun BackupAndSyncSection(
                         }
                     },
                     modifier = Modifier
-                        .weight(1f)
+                        .fillMaxWidth()
                         .testTag("create_backup_button"),
+                    enabled = !isOperating,
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("تهیه پشتیبان (Backup)")
+                    Icon(imageVector = Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("تهیه پشتیبان کامل و اشتراک‌گذاری (Share)")
                 }
 
-                OutlinedButton(
-                    onClick = { restoreLauncher.launch("*/*") },
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("restore_backup_button"),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("بازیابی اطلاعات (Restore)")
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                isOperating = true
+                                operationMessage = "در حال آماده‌سازی فایل پشتیبان جهت ذخیره‌سازی..."
+                                val result = DatabaseBackupHelper.createDatabaseBackup(context)
+                                isOperating = false
+                                if (result.isSuccess) {
+                                    val backupFile = result.getOrNull()!!
+                                    refreshBackups()
+                                    pendingFileToSave = backupFile
+                                    saveToStorageLauncher.launch(backupFile.name)
+                                } else {
+                                    Toast.makeText(context, "خطا در تهیه فایل: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("save_backup_to_storage_button"),
+                        enabled = !isOperating,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("ذخیره در حافظه", fontSize = 12.sp)
+                    }
+
+                    OutlinedButton(
+                        onClick = { restorePickerLauncher.launch("*/*") },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("restore_backup_button"),
+                        enabled = !isOperating,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("بازیابی از فایل...", fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+
+    // Local Backups List Card
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.Folder, contentDescription = null, tint = PersianGold)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "نسخه‌های پشتیبان محلی دستگاه (${existingBackups.size})",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+                IconButton(onClick = { refreshBackups() }) {
+                    Icon(imageVector = Icons.Default.Refresh, contentDescription = "به‌روزرسانی لیست")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+            if (existingBackups.isEmpty()) {
+                Text(
+                    text = "هنوز نسخه پشتیبانی در حافظه داخلی ذخیره نشده است. با دکمه بالا می‌توانید اولین نسخه را تهیه کنید.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    existingBackups.forEach { file ->
+                        val sizeKb = (file.length() / 1024).coerceAtLeast(1)
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = file.name,
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = "حجم: $sizeKb کیلوبایت",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    // Quick Restore Button
+                                    TextButton(
+                                        onClick = {
+                                            pendingRestoreUri = android.net.Uri.fromFile(file)
+                                            pendingRestoreFileName = file.name
+                                        },
+                                        enabled = !isOperating,
+                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text("بازیابی", fontSize = 11.sp, color = PersianGold)
+                                    }
+
+                                    // Quick Share Button
+                                    IconButton(
+                                        onClick = { DatabaseBackupHelper.shareBackupFile(context, file) },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(imageVector = Icons.Default.Share, contentDescription = "اشتراک‌گذاری", modifier = Modifier.size(16.dp))
+                                    }
+
+                                    // Quick Delete Button
+                                    IconButton(
+                                        onClick = { fileToDelete = file },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "حذف فایل پشتیبان",
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1365,7 +1589,7 @@ private fun BackupAndSyncSection(
                         Toast.makeText(context, "همگام‌سازی با موفقیت انجام شد.", Toast.LENGTH_SHORT).show()
                     }
                 },
-                enabled = !isSyncing,
+                enabled = !isSyncing && !isOperating,
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("sync_cloud_button"),
@@ -1376,6 +1600,106 @@ private fun BackupAndSyncSection(
                 Text(if (isSyncing) "در حال همگام‌سازی..." else "همگام‌سازی با فضای ابری")
             }
         }
+    }
+
+    // Confirmation Dialog: Restore Database
+    if (pendingRestoreUri != null) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!isOperating) {
+                    pendingRestoreUri = null
+                    pendingRestoreFileName = null
+                }
+            },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(36.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "تأیید بازیابی پایگاه داده (Full Restore)",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "فایل انتخاب‌شده: ${pendingRestoreFileName ?: ""}",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "هشدار بسیار مهم:\n" +
+                                "با اجرای بازیابی، ابتدا اتصال دیتابیس فعلی به‌صورت ایمن بسته شده و تمامی اطلاعات، فاکتورها، کاردکس انبار، اسناد دوبل و مانده‌حساب‌ها با محتوای این فایل پشتیبان جایگزین خواهند شد.\n\n" +
+                                "پس از بازیابی موفق، برنامه برای بارگذاری داده‌های جدید به‌صورت خودکار راه‌اندازی مجدد می‌شود.\n\n" +
+                                "آیا مایل به ادامه عملیات هستید؟",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 20.sp
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val uri = pendingRestoreUri
+                        pendingRestoreUri = null
+                        pendingRestoreFileName = null
+                        if (uri != null) {
+                            executeRestore(uri)
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("تأیید و اجرای بازیابی کامل")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        pendingRestoreUri = null
+                        pendingRestoreFileName = null
+                    }
+                ) {
+                    Text("انصراف")
+                }
+            }
+        )
+    }
+
+    // Confirmation Dialog: Delete Backup File
+    fileToDelete?.let { file ->
+        AlertDialog(
+            onDismissRequest = { fileToDelete = null },
+            title = { Text("حذف فایل پشتیبان", fontWeight = FontWeight.Bold) },
+            text = { Text("آیا از حذف دائم فایل پشتیبان «${file.name}» اطمینان دارید؟") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        DatabaseBackupHelper.deleteBackupFile(file)
+                        fileToDelete = null
+                        refreshBackups()
+                        Toast.makeText(context, "فایل پشتیبان با موفقیت حذف شد.", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("حذف")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { fileToDelete = null }) {
+                    Text("انصراف")
+                }
+            }
+        )
     }
 }
 

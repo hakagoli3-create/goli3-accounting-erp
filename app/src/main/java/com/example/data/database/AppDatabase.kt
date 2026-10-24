@@ -81,6 +81,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun storeSettingsDao(): StoreSettingsDao
 
     companion object {
+        const val DATABASE_VERSION = 9
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 

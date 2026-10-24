@@ -236,14 +236,18 @@ object DatabaseBackupHelper {
                 Log.w(TAG, "Warning checking DB version: ${e.localizedMessage}")
             }
 
-            if (incomingVersion > 8) {
+            if (incomingVersion > AppDatabase.DATABASE_VERSION) {
                 tempRestoreFile.delete()
-                val errorMsg = "این فایل پشتیبان مربوط به نسخه جدیدتری از نرم‌افزار (نسخه ساختار $incomingVersion) است و در نسخه فعلی قابل بازیابی نیست."
+                val errorMsg = "این فایل پشتیبان مربوط به نسخه جدیدتری از نرم‌افزار (نسخه ساختار $incomingVersion) است و در نسخه فعلی (نسخه ${AppDatabase.DATABASE_VERSION}) قابل بازیابی نیست."
                 Log.e(TAG, errorMsg)
                 return@withContext Result.failure(IllegalArgumentException(errorMsg))
             }
 
-            // گام ۴: ایجاد نسخه پشتیبان محافظتی (Safety Backup) از وضعیت فعلی قبل از هرگونه تغییر
+            // گام ۴: بستن قطعی تمام اتصالات فعال Room قبل از دستکاری و کپی
+            Log.i(TAG, "Closing active AppDatabase connection before restore...")
+            AppDatabase.closeInstance()
+
+            // ایجاد نسخه پشتیبان محافظتی (Safety Backup) از وضعیت فعلی قبل از هرگونه تغییر
             if (currentDbPath.exists() && currentDbPath.length() > 0L) {
                 try {
                     FileInputStream(currentDbPath).use { inStream ->
@@ -259,11 +263,7 @@ object DatabaseBackupHelper {
                 }
             }
 
-            // گام ۵: بستن کامل اتصالات Room
-            Log.i(TAG, "Closing active AppDatabase connection before overwriting file...")
-            AppDatabase.closeInstance()
-
-            // گام ۶: حذف فایل‌های لاگ WAL / SHM / Journal
+            // گام ۵: پاکسازی فایل‌های ژورنال قدیمی (WAL / SHM / Journal)
             if (walFile.exists()) walFile.delete()
             if (shmFile.exists()) shmFile.delete()
             if (journalFile.exists()) journalFile.delete()
@@ -379,8 +379,47 @@ object DatabaseBackupHelper {
     fun getExistingBackupFiles(context: Context): List<File> {
         val backupDir = getBackupDirectory(context)
         return backupDir.listFiles { file ->
-            file.isFile && file.name.endsWith(".db")
+            file.isFile && (
+                file.name.endsWith(".db", ignoreCase = true) ||
+                file.name.endsWith(".sqlite", ignoreCase = true) ||
+                file.name.endsWith(".sqlite3", ignoreCase = true)
+            )
         }?.sortedByDescending { it.lastModified() } ?: emptyList()
+    }
+
+    /**
+     * کپی فایل پشتیبان در مقصد انتخابی کاربر (مانند ذخیره مستقیم در پوشه Downloads یا فلش/کارت حافظه)
+     */
+    suspend fun copyBackupToUri(context: Context, backupFile: File, targetUri: Uri): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val pfd = context.contentResolver.openFileDescriptor(targetUri, "w")
+                ?: return@withContext Result.failure(IOException("امکان باز کردن مسیر مقصد برای نوشتن وجود ندارد."))
+            pfd.use { descriptor ->
+                FileOutputStream(descriptor.fileDescriptor).use { output ->
+                    FileInputStream(backupFile).use { input ->
+                        input.copyTo(output, bufferSize = 32768)
+                        output.flush()
+                        output.fd.sync()
+                    }
+                }
+            }
+            Result.success(true)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to copy backup to target URI: ${e.localizedMessage}", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * حذف فایل پشتیبان قدیمی از حافظه محلی
+     */
+    fun deleteBackupFile(file: File): Boolean {
+        return try {
+            if (file.exists()) file.delete() else false
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to delete backup file: ${e.localizedMessage}")
+            false
+        }
     }
 
     /**

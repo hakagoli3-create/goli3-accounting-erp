@@ -5,6 +5,10 @@ import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.database.AppDatabase
 import com.example.data.model.AppSecurityAndSettingsManager
+import com.example.data.model.InvoiceEntity
+import com.example.data.model.InvoiceItemEntity
+import com.example.data.model.JournalEntryEntity
+import com.example.data.model.JournalItemEntity
 import com.example.data.model.PartyEntity
 import com.example.data.model.ProductEntity
 import com.example.data.model.StoreProfile
@@ -192,6 +196,94 @@ class BackupAndRestoreDiagnosticTest {
             assertEquals("مشتری محفوظ", party?.name)
             assertEquals("فروشگاه ایمن قبل از تست", securityManager.storeProfile.value.name)
             corruptFile.delete()
+        }
+    }
+
+    @Test
+    fun `diagnostic test full database all tables backup and restore`() {
+        runBlocking {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val db = AppDatabase.getInstance(context)
+
+            // ۱. ثبت فاکتور و اقلام
+            val invoice = InvoiceEntity(
+                invoiceNumber = "INV-BACKUP-100",
+                invoiceType = "SALE",
+                jalaliDate = "1403/08/03",
+                partyName = "مشتری فاکتور تست",
+                totalAmount = 2500000,
+                isPaid = true
+            )
+            val invoiceId = db.invoiceDao().insertInvoice(invoice)
+            val item = InvoiceItemEntity(
+                invoiceId = invoiceId,
+                productId = 1L,
+                productName = "کالای تستی فاکتور",
+                quantity = 5.0,
+                unitPrice = 500000,
+                totalPrice = 2500000
+            )
+            db.invoiceDao().insertInvoiceItems(listOf(item))
+
+            // ۲. ثبت سند حسابداری و ردیف‌های سند
+            val journalEntry = JournalEntryEntity(
+                voucherNumber = 5500L,
+                jalaliDate = "1403/08/03",
+                description = "سند تست پشتیبان کامل"
+            )
+            val voucherId = db.accountingDao().insertJournalEntry(journalEntry)
+            val journalItemDebit = JournalItemEntity(
+                voucherId = voucherId,
+                generalCode = 101,
+                subsidiaryCode = 10101,
+                description = "صندوق نقدی",
+                debit = 2500000,
+                credit = 0
+            )
+            val journalItemCredit = JournalItemEntity(
+                voucherId = voucherId,
+                generalCode = 601,
+                subsidiaryCode = 60101,
+                description = "فروش کالا",
+                debit = 0,
+                credit = 2500000
+            )
+            db.accountingDao().insertJournalItems(listOf(journalItemDebit, journalItemCredit))
+
+            // ۳. ایجاد فایل پشتیبان
+            val backupResult = DatabaseBackupHelper.createDatabaseBackup(context)
+            assertTrue("Backup creation must succeed", backupResult.isSuccess)
+            val backupFile = backupResult.getOrNull()!!
+
+            // ۴. پاکسازی / تغییر داده‌ها در دیتابیس فعلی
+            val insertedInvoice = db.invoiceDao().getInvoiceById(invoiceId)
+            val insertedVoucher = db.accountingDao().getJournalEntryById(voucherId)
+            if (insertedInvoice != null) db.invoiceDao().deleteInvoice(insertedInvoice)
+            if (insertedVoucher != null) db.accountingDao().deleteJournalEntry(insertedVoucher)
+            org.junit.Assert.assertNull(db.invoiceDao().getInvoiceById(invoiceId))
+            org.junit.Assert.assertNull(db.accountingDao().getJournalEntryById(voucherId))
+
+            // ۵. بازیابی کامل
+            val restoreResult = DatabaseBackupHelper.restoreDatabaseFromFile(context, Uri.fromFile(backupFile))
+            assertTrue("Restore must succeed", restoreResult.isSuccess)
+
+            // ۶. بررسی صحت بازیابی تمام جداول
+            val restoredDb = AppDatabase.getInstance(context)
+            val restoredInvoice = restoredDb.invoiceDao().getInvoiceById(invoiceId)
+            assertNotNull("فاکتور باید بازگردانی شده باشد", restoredInvoice)
+            assertEquals("INV-BACKUP-100", restoredInvoice?.invoiceNumber)
+            assertEquals(2500000L, restoredInvoice?.totalAmount)
+
+            val restoredItems = restoredDb.invoiceDao().getItemsForInvoice(invoiceId)
+            assertEquals("اقلام فاکتور باید دقیقاً بازگردانی شده باشند", 1, restoredItems.size)
+            assertEquals("کالای تستی فاکتور", restoredItems[0].productName)
+
+            val restoredVoucher = restoredDb.accountingDao().getJournalEntryById(voucherId)
+            assertNotNull("سند حسابداری باید بازگردانی شده باشد", restoredVoucher)
+            assertEquals(5500L, restoredVoucher?.voucherNumber)
+
+            val restoredVoucherItems = restoredDb.accountingDao().getJournalItemsByVoucherSync(voucherId)
+            assertEquals("ردیف‌های سند حسابداری باید دقیقاً بازگردانی شده باشند", 2, restoredVoucherItems.size)
         }
     }
 }

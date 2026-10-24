@@ -161,9 +161,9 @@ object DatabaseSecurityManager {
                 return Pair(false, "تست سلامت PRAGMA integrity_check روی پایگاه داده ناموفق بود.")
             }
 
-            // 3. بررسی وجود جداول کلیدی حسابداری و مالی
+            // 3. بررسی وجود جداول کلیدی حسابداری، انبار و مالی
             val tablesCursor = testDb.rawQuery(
-                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('invoices', 'products', 'warehouses', 'users')",
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('invoices', 'products', 'warehouses', 'users', 'parties', 'journal_entries', 'cash_desks')",
                 null
             )
             var tableCount = 0
