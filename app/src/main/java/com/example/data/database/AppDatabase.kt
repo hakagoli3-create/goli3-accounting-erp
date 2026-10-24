@@ -381,6 +381,10 @@ abstract class AppDatabase : RoomDatabase() {
                                     partyDao.sanitizePartyJournalItems()
                                     partyDao.recalculateAllPartyBalances()
                                 } catch (_: Exception) {}
+                                try {
+                                    val invoiceRepo = com.example.data.repository.InvoiceRepository(getInstance(context))
+                                    invoiceRepo.cleanupCorruptedMovementsAndReconcileStock()
+                                } catch (_: Exception) {}
                             }
                         }
                     })

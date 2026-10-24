@@ -580,6 +580,26 @@ class InvoiceViewModel(
     }
 
     /**
+     * پاکسازی داده‌های معیوب، حذف کاردکس‌های تکراری و بازیابی دقیق موجودی انبار
+     */
+    fun cleanCorruptedMovementsAndReconcileStock(onDone: (Int) -> Unit = {}) {
+        viewModelScope.launch {
+            try {
+                val cleanedCount = invoiceRepo.cleanupCorruptedMovementsAndReconcileStock()
+                if (cleanedCount > 0) {
+                    _alertMessage.value = "اصلاح و پاکسازی کاردکس انجام شد: $cleanedCount رکورد تکراری یا نامعتبر پاکسازی و موجودی انبار بازنگری شد."
+                } else {
+                    _alertMessage.value = "کاردکس انبار و موجودی کالاها در وضعیت صحیح و بدون خطا قرار دارند."
+                }
+                onDone(cleanedCount)
+            } catch (e: Exception) {
+                _alertMessage.value = "خطا در پاکسازی کاردکس: ${e.message}"
+                onDone(0)
+            }
+        }
+    }
+
+    /**
      * ارسال مستقیم دستورات چاپ به پرینتر حرارتی بلوتوثی
      */
     fun printThermalReceiptBluetooth(

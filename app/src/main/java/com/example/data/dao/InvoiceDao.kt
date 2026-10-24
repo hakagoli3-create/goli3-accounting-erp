@@ -24,6 +24,9 @@ interface InvoiceDao {
     @Query("SELECT * FROM invoices WHERE partyId = :partyId ORDER BY id DESC")
     fun getInvoicesForParty(partyId: Long): Flow<List<InvoiceEntity>>
 
+    @Query("SELECT * FROM invoices ORDER BY id ASC")
+    suspend fun getAllInvoicesDirect(): List<InvoiceEntity>
+
     @Query("SELECT COALESCE(MAX(id), 0) FROM invoices")
     suspend fun getMaxInvoiceId(): Long
 

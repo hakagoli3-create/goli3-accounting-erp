@@ -25,6 +25,15 @@ class InvoiceRepository(
     private val appDatabase: AppDatabase? = null
 ) {
 
+    constructor(db: AppDatabase) : this(
+        invoiceDao = db.invoiceDao(),
+        inventoryDao = db.inventoryDao(),
+        partyDao = db.partyDao(),
+        treasuryDao = db.treasuryDao(),
+        accountingDao = db.accountingDao(),
+        appDatabase = db
+    )
+
     private suspend fun <T> runInTransaction(block: suspend () -> T): T {
         return if (appDatabase != null) {
             appDatabase.withTransaction { block() }
@@ -161,7 +170,26 @@ class InvoiceRepository(
     ) {
         val validWarehouseId = warehouseIdOverride ?: resolveAndEnsureWarehouse(invoice.warehouseId)
 
-        // 1. به روزرسانی کاردکس و موجودی انبار برای هر قلم
+        // 1. تضمین قطعی عدم ثبت تکراری (Idempotency):
+        // اگر قبلاً برای این شماره فاکتور، رخداد انبار ثبت شده باشد،
+        // ابتدا اثرات موجودی رخدادهای قبلی برگشت داده شده و رکوردهای قبلی پاک می‌شوند
+        val existingMovements = inventoryDao.getMovementsByReferenceNumber(invoice.invoiceNumber)
+        if (existingMovements.isNotEmpty()) {
+            for (prevMov in existingMovements) {
+                inventoryDao.adjustStock(prevMov.productId, -prevMov.quantitySecondary)
+            }
+            inventoryDao.deleteMovementsByExactReference(invoice.invoiceNumber)
+        }
+        // حذف قطعی هرگونه رخداد ناخواسته معکوس (REV) مربوط به این فاکتور و معکوس‌سازی اثر آن
+        val existingRevs = inventoryDao.getMovementsByExactReference("REV-${invoice.invoiceNumber}")
+        if (existingRevs.isNotEmpty()) {
+            for (rev in existingRevs) {
+                inventoryDao.adjustStock(rev.productId, -rev.quantitySecondary)
+            }
+            inventoryDao.deleteMovementsByExactReference("REV-${invoice.invoiceNumber}")
+        }
+
+        // به روزرسانی کاردکس و موجودی انبار برای هر قلم (دقیقاً یک رکورد تمیز به ازای هر قلم)
         for (item in items) {
             val stockDelta = when (invoice.invoiceType) {
                 "SALE", "POS_SALE" -> -item.quantityInSecondary // خروج از انبار
@@ -888,7 +916,145 @@ class InvoiceRepository(
     }
 
     /**
-     * ویرایش کامل فاکتور موجود: برگشت اثرات قبلی و اعمال تغییرات جدید در یک تراکنش واحد اتمیک
+     * معکوس کردن مانده‌های مالی (طرف‌حساب و خزانه‌داری) فاکتور گذشته هنگام ویرایش،
+     * بدون ثبت رخداد ابطال REV در کاردکس انبار و بدون صدور سند دوبل ابطال
+     */
+    private suspend fun revertFinancialEffectsForInvoice(invoice: InvoiceEntity) {
+        val rate = if (invoice.currencyRateToBase > 0) invoice.currencyRateToBase else 1.0
+        fun toBase(amount: Long): Long {
+            if (rate == 1.0 || amount == 0L) return amount
+            return java.math.BigDecimal(amount)
+                .multiply(java.math.BigDecimal.valueOf(rate))
+                .setScale(0, java.math.RoundingMode.HALF_UP)
+                .toLong()
+        }
+        val toBaseCredit = if (invoice.paymentType == "CREDIT") invoice.totalAmount else invoice.creditAmount
+        val totalInBase = if (rate == 1.0 || invoice.totalAmountInBase <= 0L) toBase(invoice.totalAmount) else invoice.totalAmountInBase
+        var creditInBase = if (rate == 1.0 || invoice.creditAmountInBase <= 0L) toBase(toBaseCredit) else invoice.creditAmountInBase
+        var cashInBase = if (rate == 1.0 || invoice.cashAmountInBase <= 0L) toBase(invoice.cashAmount) else invoice.cashAmountInBase
+        var posInBase = if (rate == 1.0 || invoice.posAmountInBase <= 0L) toBase(invoice.posAmount) else invoice.posAmountInBase
+        var chequeInBase = if (rate == 1.0 || invoice.chequeAmountInBase <= 0L) toBase(invoice.chequeAmount) else invoice.chequeAmountInBase
+
+        val immediatePaidInBase = cashInBase + posInBase + chequeInBase
+        if (creditInBase == 0L && immediatePaidInBase < totalInBase) {
+            creditInBase = totalInBase - immediatePaidInBase
+        }
+
+        val paymentSum = cashInBase + posInBase + chequeInBase + creditInBase
+        val roundingDiff = totalInBase - paymentSum
+        if (roundingDiff != 0L) {
+            when {
+                creditInBase > 0 -> creditInBase += roundingDiff
+                posInBase > 0 -> posInBase += roundingDiff
+                cashInBase > 0 -> cashInBase += roundingDiff
+                chequeInBase > 0 -> chequeInBase += roundingDiff
+                else -> creditInBase += roundingDiff
+            }
+        }
+
+        try {
+            if (invoice.partyId != null && creditInBase > 0) {
+                val factor = when (invoice.invoiceType) {
+                    "SALE", "POS_SALE" -> -1L
+                    "PURCHASE" -> 1L
+                    "RETURN_SALE" -> 1L
+                    "RETURN_PURCHASE" -> -1L
+                    else -> -1L
+                }
+                partyDao.updatePartyBalance(invoice.partyId, factor * creditInBase)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("InvoiceRepository", "Error reversing party balance on edit invoice", e)
+        }
+
+        try {
+            val treasuryFactor = when (invoice.invoiceType) {
+                "SALE", "POS_SALE", "RETURN_PURCHASE" -> -1L
+                "PURCHASE", "RETURN_SALE" -> 1L
+                else -> -1L
+            }
+            if (invoice.cashAmount > 0) {
+                treasuryDao.updateCashBalance(invoice.cashDeskId, treasuryFactor * cashInBase)
+                val currBal = treasuryDao.getCurrencyBalance("CASH", invoice.cashDeskId, invoice.currencyCode)
+                val newBal = (currBal?.balance ?: 0.0) + (treasuryFactor * invoice.cashAmount)
+                treasuryDao.insertOrUpdateCurrencyBalance(
+                    com.example.data.model.TreasuryCurrencyBalanceEntity(
+                        id = currBal?.id ?: 0L,
+                        accountType = "CASH",
+                        accountId = invoice.cashDeskId,
+                        currencyCode = invoice.currencyCode,
+                        balance = newBal
+                    )
+                )
+            }
+            if (invoice.posAmount > 0) {
+                treasuryDao.updateBankBalance(invoice.bankAccountId, treasuryFactor * posInBase)
+                val currBal = treasuryDao.getCurrencyBalance("BANK", invoice.bankAccountId, invoice.currencyCode)
+                val newBal = (currBal?.balance ?: 0.0) + (treasuryFactor * invoice.posAmount)
+                treasuryDao.insertOrUpdateCurrencyBalance(
+                    com.example.data.model.TreasuryCurrencyBalanceEntity(
+                        id = currBal?.id ?: 0L,
+                        accountType = "BANK",
+                        accountId = invoice.bankAccountId,
+                        currencyCode = invoice.currencyCode,
+                        balance = newBal
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("InvoiceRepository", "Error reversing treasury balance on edit invoice", e)
+        }
+    }
+
+    /**
+     * پاکسازی داده‌های معیوب، رکوردهای کاردکس تکراری و رخدادهای ناخواسته REV
+     * و محاسبه مجدد موجودی واقعی کلیه کالاها بر مبنای گردش‌های رسمی (رفع دائم باگ)
+     */
+    suspend fun cleanupCorruptedMovementsAndReconcileStock(): Int = runInTransaction {
+        try {
+            var cleanedCount = 0
+
+            // ۱. پاکسازی رخدادهای ناخواسته REV برای فاکتورهایی که باطل نشده‌اند (FINAL یا PROFORMA)
+            val nonVoidInvoices = invoiceDao.getAllInvoicesDirect().filter { it.status != "VOID" }
+            for (inv in nonVoidInvoices) {
+                val unwantedRevs = inventoryDao.getMovementsByExactReference("REV-${inv.invoiceNumber}")
+                if (unwantedRevs.isNotEmpty()) {
+                    for (rev in unwantedRevs) {
+                        inventoryDao.adjustStock(rev.productId, -rev.quantitySecondary)
+                    }
+                    inventoryDao.deleteMovementsByExactReference("REV-${inv.invoiceNumber}")
+                    cleanedCount += unwantedRevs.size
+                }
+            }
+
+            // ۲. پاکسازی رخدادهای تکراری برای یک شماره فاکتور و کالا: نگه داشتن تنها آخرین رکورد معتبر
+            val allMovements = inventoryDao.getAllMovementsDirect()
+            val groupedByInvoiceAndProduct = allMovements
+                .filter { it.referenceNumber.isNotBlank() && !it.referenceNumber.startsWith("TRANSFER") && !it.referenceNumber.startsWith("ADJ") }
+                .groupBy { "${it.referenceNumber}__${it.productId}" }
+
+            for ((_, movementsList) in groupedByInvoiceAndProduct) {
+                if (movementsList.size > 1) {
+                    val sorted = movementsList.sortedBy { it.id }
+                    val duplicates = sorted.dropLast(1)
+                    for (dup in duplicates) {
+                        inventoryDao.adjustStock(dup.productId, -dup.quantitySecondary)
+                        inventoryDao.deleteMovementById(dup.id)
+                        cleanedCount++
+                    }
+                }
+            }
+
+            android.util.Log.i("InvoiceRepository", "Cleanup completed: removed $cleanedCount corrupted movement records.")
+            cleanedCount
+        } catch (e: Exception) {
+            android.util.Log.e("InvoiceRepository", "Error in cleanupCorruptedMovementsAndReconcileStock", e)
+            0
+        }
+    }
+
+    /**
+     * ویرایش کامل فاکتور موجود: بدون ایجاد رخداد ناخواسته REV و با تضمین سطر واحد در کاردکس
      */
     suspend fun updateExistingInvoice(
         invoiceId: Long,
@@ -900,9 +1066,14 @@ class InvoiceRepository(
             val oldInvoiceWithItems = invoiceDao.getInvoiceWithItemsById(invoiceId) ?: return@runInTransaction false
             val oldInvoice = oldInvoiceWithItems.invoice
 
-            // اگر فاکتور قبلاً قطعی بود، اثرات گذشته را برگشت می‌زنیم
+            // اگر فاکتور قبلاً قطعی بود، اثرات مالی آن را معکوس کرده و اسناد حسابداری قبلی را پاک می‌کنیم
+            // دقت: در ویرایش فاکتور عادی به هیچ وجه نباید رخداد REV در کاردکس یا سند ابطال ثبت شود
             if (oldInvoice.status == "FINAL") {
-                rollbackInvoiceEffects(oldInvoice, oldInvoiceWithItems.items)
+                revertFinancialEffectsForInvoice(oldInvoice)
+                accountingDao.deleteJournalItemsByDescriptionPattern(oldInvoice.invoiceNumber)
+                accountingDao.deleteJournalEntriesByDescriptionPattern(oldInvoice.invoiceNumber)
+                accountingDao.deleteJournalItemsByDescriptionPattern("REV-${oldInvoice.invoiceNumber}")
+                accountingDao.deleteJournalEntriesByDescriptionPattern("REV-${oldInvoice.invoiceNumber}")
             }
 
             // حذف قطعی چک‌های قبلی این فاکتور جهت جلوگیری از تکرار چک
@@ -922,14 +1093,14 @@ class InvoiceRepository(
             val attachedItems = resolvedItems.map { it.copy(id = 0L, invoiceId = invoiceId) }
             invoiceDao.insertInvoiceItems(attachedItems)
 
-            // اعمال مجدد اثرات فاکتور در صورتی که قطعی باشد
+            // اعمال اثرات جدید فاکتور (شامل ثبت تمیز کاردکس بدون تکرار و صدور سند جدید)
             if (readyInvoice.status == "FINAL") {
                 applyInvoiceEffects(readyInvoice, attachedItems, cheque, validWarehouseId)
             }
             true
         } catch (e: Exception) {
             android.util.Log.e("InvoiceRepository", "Error updating existing invoice", e)
-            throw e // Throw so transaction rolls back completely on any failure
+            throw e
         }
     }
 
@@ -959,10 +1130,13 @@ class InvoiceRepository(
         try {
             val invoiceWithItems = invoiceDao.getInvoiceWithItemsById(invoiceId) ?: return@runInTransaction false
             val invoice = invoiceWithItems.invoice
-            if (invoice.status == "VOID") return@runInTransaction false
+            if (invoice.status == "VOID") return@runInTransaction true
 
             if (invoice.status == "FINAL") {
-                rollbackInvoiceEffects(invoice, invoiceWithItems.items)
+                val existingRev = inventoryDao.getMovementsByExactReference("REV-${invoice.invoiceNumber}")
+                if (existingRev.isEmpty()) {
+                    rollbackInvoiceEffects(invoice, invoiceWithItems.items)
+                }
             }
 
             invoiceDao.setInvoiceStatus(invoiceId, "VOID")

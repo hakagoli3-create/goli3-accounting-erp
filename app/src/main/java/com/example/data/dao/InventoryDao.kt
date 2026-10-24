@@ -142,8 +142,26 @@ interface InventoryDao {
     @Query("DELETE FROM inventory_movements WHERE id = :id")
     suspend fun deleteMovementById(id: Long): Int
 
+    @Query("SELECT * FROM inventory_movements ORDER BY timestamp DESC, id DESC")
+    suspend fun getAllMovementsDirect(): List<InventoryMovementEntity>
+
+    @Query("SELECT * FROM inventory_movements WHERE referenceNumber = :referenceNumber OR referenceNumber = 'REV-' || :referenceNumber")
+    suspend fun getMovementsByReferenceNumber(referenceNumber: String): List<InventoryMovementEntity>
+
+    @Query("SELECT * FROM inventory_movements WHERE referenceNumber = :referenceNumber")
+    suspend fun getMovementsByExactReference(referenceNumber: String): List<InventoryMovementEntity>
+
+    @Query("DELETE FROM inventory_movements WHERE referenceNumber = :referenceNumber OR referenceNumber = 'REV-' || :referenceNumber")
+    suspend fun deleteMovementsByExactReference(referenceNumber: String): Int
+
     @Query("DELETE FROM inventory_movements WHERE referenceNumber = :referenceNumber OR referenceNumber LIKE '%' || :referenceNumber || '%'")
     suspend fun deleteMovementsByReference(referenceNumber: String): Int
+
+    @Query("UPDATE products SET currentStockInSecondary = (SELECT COALESCE(SUM(quantitySecondary), 0.0) FROM inventory_movements WHERE productId = products.id)")
+    suspend fun recalculateAllProductStocksFromMovements(): Int
+
+    @Query("UPDATE products SET currentStockInSecondary = (SELECT COALESCE(SUM(quantitySecondary), 0.0) FROM inventory_movements WHERE productId = :productId) WHERE id = :productId")
+    suspend fun recalculateSingleProductStockFromMovements(productId: Long): Int
 
     @Query("DELETE FROM invoice_items WHERE productId = :productId")
     suspend fun deleteInvoiceItemsForProduct(productId: Long): Int
