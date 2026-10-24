@@ -335,7 +335,7 @@ fun CrmScreen(
                 showPartyDialog = false
                 editingParty = null
             },
-            onSave = { code, name, company, mobile, phone, address, national, economic, type, credit, notes ->
+            onSave = { code, name, company, mobile, phone, address, national, economic, type, credit, notes, initialBalance, initialBalanceType ->
                 if (editingParty != null) {
                     val updated = editingParty!!.copy(
                         code = code,
@@ -348,16 +348,31 @@ fun CrmScreen(
                         economicCode = economic.trim(),
                         partyType = type,
                         creditLimit = credit,
-                        notes = notes.trim()
+                        notes = notes.trim(),
+                        initialBalance = initialBalance,
+                        initialBalanceType = initialBalanceType
                     )
                     viewModel.updateParty(updated) {
-                        Toast.makeText(context, "اطلاعات «$name» با موفقیت ویرایش گردید.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "اطلاعات «$name» و سند افتتاحیه با موفقیت به‌روزرسانی شد.", Toast.LENGTH_SHORT).show()
                         showPartyDialog = false
                         editingParty = null
                     }
                 } else {
-                    viewModel.addParty(code, name, company, mobile, phone, address, national, type, credit, notes) {
-                        Toast.makeText(context, "طرف حساب «$name» با موفقیت افزوده شد.", Toast.LENGTH_SHORT).show()
+                    viewModel.addParty(
+                        code = code,
+                        name = name,
+                        company = company,
+                        mobile = mobile,
+                        phone = phone,
+                        address = address,
+                        nationalCode = national,
+                        partyType = type,
+                        creditLimit = credit,
+                        notes = notes,
+                        initialBalance = initialBalance,
+                        initialBalanceType = initialBalanceType
+                    ) {
+                        Toast.makeText(context, "طرف حساب «$name» با سند افتتاحیه با موفقیت افزوده شد.", Toast.LENGTH_SHORT).show()
                         showPartyDialog = false
                     }
                 }
@@ -657,17 +672,28 @@ private fun PartyCardItem(
                     )
                 }
 
-                Box(
-                    modifier = Modifier
-                        .background(balBg, RoundedCornerShape(8.dp))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = balText,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = balColor
-                    )
+                Column(horizontalAlignment = Alignment.End) {
+                    Box(
+                        modifier = Modifier
+                            .background(balBg, RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = balText,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = balColor
+                        )
+                    }
+                    if (party.initialBalance > 0L) {
+                        val initTypeLabel = if (party.initialBalanceType == "DEBIT") "طلب اول دوره" else "بدهی اول دوره"
+                        Text(
+                            text = "افتتاحیه: ${NumberFormatUtils.formatPrice(party.initialBalance)} ($initTypeLabel)",
+                            fontSize = 9.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
                 }
             }
 
@@ -917,6 +943,19 @@ private fun CustomerStatementDialog(
                             )
                         }
 
+                        if (party.initialBalance > 0L) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(text = "مانده اول دوره:", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                val initTypeLabel = if (party.initialBalanceType == "DEBIT") "طلب ما" else "بدهی ما"
+                                Text(
+                                    text = "${NumberFormatUtils.formatPrice(party.initialBalance)} ($initTypeLabel)",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = if (party.initialBalanceType == "DEBIT") AccountingDebitGreen else AccountingCreditRed
+                                )
+                            }
+                        }
+
                         Column(horizontalAlignment = Alignment.End) {
                             Text(text = "تعداد کل فاکتورها:", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(
@@ -924,6 +963,59 @@ private fun CustomerStatementDialog(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+
+                if (party.initialBalance > 0L) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    val isDebit = party.initialBalanceType == "DEBIT"
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isDebit) AccountingDebitGreen.copy(alpha = 0.08f) else AccountingCreditRed.copy(alpha = 0.08f)
+                        ),
+                        border = BorderStroke(
+                            1.dp,
+                            if (isDebit) AccountingDebitGreen.copy(alpha = 0.35f) else AccountingCreditRed.copy(alpha = 0.35f)
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = if (isDebit) Icons.Default.TrendingUp else Icons.Default.TrendingDown,
+                                    contentDescription = null,
+                                    tint = if (isDebit) AccountingDebitGreen else AccountingCreditRed,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Column {
+                                    Text(
+                                        text = "سند حسابداری افتتاحیه (مانده اول دوره)",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isDebit) AccountingDebitGreen else AccountingCreditRed
+                                    )
+                                    Text(
+                                        text = "ثبت شده در کد تفصیلی ${party.code} و متصل به دفتر معین",
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "${NumberFormatUtils.formatPrice(party.initialBalance)} (${if (isDebit) "بدهکار" else "بستانکار"})",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDebit) AccountingDebitGreen else AccountingCreditRed
                             )
                         }
                     }
@@ -1072,7 +1164,9 @@ private fun AddOrEditPartyDialog(
         economic: String,
         partyType: String,
         creditLimit: Long,
-        notes: String
+        notes: String,
+        initialBalance: Long,
+        initialBalanceType: String
     ) -> Unit
 ) {
     var name by remember(partyToEdit) { mutableStateOf(partyToEdit?.name ?: "") }
@@ -1084,10 +1178,17 @@ private fun AddOrEditPartyDialog(
     var national by remember(partyToEdit) { mutableStateOf(partyToEdit?.nationalCode ?: "") }
     var economic by remember(partyToEdit) { mutableStateOf(partyToEdit?.economicCode ?: "") }
     var creditText by remember(partyToEdit) { mutableStateOf(if (partyToEdit != null) partyToEdit.creditLimit.toString() else "50000000") }
+    var initialBalanceText by remember(partyToEdit) {
+        mutableStateOf(if (partyToEdit != null && partyToEdit.initialBalance > 0L) partyToEdit.initialBalance.toString() else "")
+    }
+    var initialBalanceType by remember(partyToEdit) {
+        mutableStateOf(partyToEdit?.initialBalanceType ?: "DEBIT")
+    }
     var partyType by remember(partyToEdit) { mutableStateOf(partyToEdit?.partyType ?: "CUSTOMER") }
     var notes by remember(partyToEdit) { mutableStateOf(partyToEdit?.notes ?: "") }
 
     val creditLong = creditText.toLongOrNull() ?: 0L
+    val initialBalanceLong = initialBalanceText.toLongOrNull() ?: 0L
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -1252,6 +1353,195 @@ private fun AddOrEditPartyDialog(
                     }
                 }
 
+                // Initial Balance (مانده اول دوره و صدور اتوماتیک سند حسابداری افتتاحیه)
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.TrendingUp,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "مانده اول دوره (صدور اتوماتیک سند افتتاحیه)",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        Text(
+                            text = "ماهیت مانده اول دوره:",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        // Nature selector: بدهکار (طلب ما) vs بستانکار (بدهی ما)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // بدهکار (طلب ما)
+                            val isDebitSelected = initialBalanceType == "DEBIT"
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isDebitSelected) AccountingDebitGreen.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isDebitSelected) AccountingDebitGreen else MaterialTheme.colorScheme.outlineVariant
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { initialBalanceType = "DEBIT" }
+                                    .testTag("initial_balance_type_debit")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.TrendingUp,
+                                        contentDescription = null,
+                                        tint = if (isDebitSelected) AccountingDebitGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "بدهکار (طلب ما)",
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isDebitSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isDebitSelected) AccountingDebitGreen else MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+
+                            // بستانکار (بدهی ما)
+                            val isCreditSelected = initialBalanceType == "CREDIT"
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isCreditSelected) AccountingCreditRed.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isCreditSelected) AccountingCreditRed else MaterialTheme.colorScheme.outlineVariant
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { initialBalanceType = "CREDIT" }
+                                    .testTag("initial_balance_type_credit")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.TrendingDown,
+                                        contentDescription = null,
+                                        tint = if (isCreditSelected) AccountingCreditRed else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "بستانکار (بدهی ما)",
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isCreditSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isCreditSelected) AccountingCreditRed else MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+
+                        // Input field for initial balance
+                        OutlinedTextField(
+                            value = initialBalanceText,
+                            onValueChange = {
+                                initialBalanceText = NumberFormatUtils.toEnglishDigits(it).filter { ch -> ch.isDigit() }
+                            },
+                            label = { Text("مانده اول دوره (تومان)") },
+                            placeholder = { Text("۰") },
+                            trailingIcon = {
+                                Text(
+                                    text = "تومان",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(end = 12.dp)
+                                )
+                            },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("party_initial_balance_input"),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+
+                        // Quick chips for initial balance
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            listOf(
+                                0L to "بدون مانده (۰)",
+                                5_000_000L to "۵ میلیون",
+                                10_000_000L to "۱۰ میلیون",
+                                20_000_000L to "۲۰ میلیون",
+                                50_000_000L to "۵۰ میلیون"
+                            ).forEach { (amt, label) ->
+                                AssistChip(
+                                    onClick = {
+                                        initialBalanceText = if (amt == 0L) "" else amt.toString()
+                                    },
+                                    label = { Text(label, fontSize = 10.sp) }
+                                )
+                            }
+                        }
+
+                        if (initialBalanceLong > 0) {
+                            val isDebit = initialBalanceType == "DEBIT"
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(
+                                        if (isDebit) AccountingDebitGreen.copy(alpha = 0.10f) else AccountingCreditRed.copy(alpha = 0.10f),
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .padding(8.dp)
+                            ) {
+                                Text(
+                                    text = if (isDebit) {
+                                        "مبلغ ${NumberFormatUtils.formatPrice(initialBalanceLong)} به عنوان طلب ما (بدهکار تجاری) در سند حسابداری افتتاحیه ثبت و به مطالبات افزوده می‌شود."
+                                    } else {
+                                        "مبلغ ${NumberFormatUtils.formatPrice(initialBalanceLong)} به عنوان بدهی ما (بستانکار تجاری) در سند حسابداری افتتاحیه ثبت و به بدهی‌ها افزوده می‌شود."
+                                    },
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (isDebit) AccountingDebitGreen else AccountingCreditRed
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // National & Economic Code
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1313,7 +1603,9 @@ private fun AddOrEditPartyDialog(
                             economic,
                             partyType,
                             creditLong,
-                            notes
+                            notes,
+                            initialBalanceLong,
+                            initialBalanceType
                         )
                     },
                     enabled = name.isNotBlank(),

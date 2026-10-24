@@ -21,6 +21,8 @@ data class PartyEntity(
     val partyType: String = "CUSTOMER", // "CUSTOMER", "SUPPLIER", "BOTH"
     val creditLimit: Long = 0L, // سقف اعتبار به تومان (۰ یعنی بدون سقف یا نقد)
     val currentBalance: Long = 0L, // مانده حساب فعلی (مثبت = بدهکار به ما، منفی = بستانکار از ما)
+    val initialBalance: Long = 0L, // مانده اول دوره به تومان
+    val initialBalanceType: String = "DEBIT", // "DEBIT" (بدهکار / طلب ما) یا "CREDIT" (بستانکار / بدهی ما)
     val isActive: Boolean = true,
     val notes: String = ""
 ) {

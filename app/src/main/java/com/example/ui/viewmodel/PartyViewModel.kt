@@ -113,6 +113,8 @@ class PartyViewModel(
         partyType: String,
         creditLimit: Long,
         notes: String,
+        initialBalance: Long = 0L,
+        initialBalanceType: String = "DEBIT",
         onSuccess: () -> Unit
     ) {
         viewModelScope.launch {
@@ -126,7 +128,9 @@ class PartyViewModel(
                 nationalCode = nationalCode,
                 partyType = partyType,
                 creditLimit = creditLimit,
-                notes = notes
+                notes = notes,
+                initialBalance = initialBalance,
+                initialBalanceType = initialBalanceType
             )
             partyRepository.insertParty(party)
             onSuccess()
@@ -140,7 +144,7 @@ class PartyViewModel(
         viewModelScope.launch {
             partyRepository.updateParty(party)
             if (_selectedParty.value?.id == party.id) {
-                _selectedParty.value = party
+                _selectedParty.value = partyRepository.getPartyById(party.id) ?: party
             }
             onSuccess()
         }

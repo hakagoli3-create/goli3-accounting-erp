@@ -27,7 +27,11 @@ class AppViewModelFactory(
     }
 
     val partyRepository: PartyRepository by lazy {
-        PartyRepository(database.partyDao())
+        PartyRepository(
+            dao = database.partyDao(),
+            accountingDao = database.accountingDao(),
+            appDatabase = database
+        )
     }
 
     val treasuryRepository: TreasuryRepository by lazy {
