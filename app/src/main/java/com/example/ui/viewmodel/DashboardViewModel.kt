@@ -31,6 +31,8 @@ data class DashboardUiState(
     val lowStockCount: Int = 0,
     val dueChequesAlertCount: Int = 0,
     val overCreditPartiesCount: Int = 0,
+    val inventoryPurchaseValue: Double = 0.0,
+    val inventorySalesValue: Double = 0.0,
     val currentShamsiDate: String = JalaliDate.now().format(),
     val currentShamsiFullDate: String = JalaliDate.now().getFormattedFullDate(),
     val isLoading: Boolean = false
@@ -46,6 +48,7 @@ private data class PartyStats(
     val supplierPayables: Long
 )
 private data class ExpenseStats(val todayExpense: Long, val totalExpense: Long)
+private data class InventoryValuationStats(val purchaseValue: Double, val salesValue: Double)
 
 class DashboardViewModel(
     private val invoiceRepo: InvoiceRepository,
@@ -57,6 +60,28 @@ class DashboardViewModel(
 ) : ViewModel() {
 
     private val todayStr = JalaliDate.now().toStandardString()
+
+    /**
+     * جریان داده ارزش کل دارایی‌های انبار بر مبنای قیمت خرید (ریال/تومان)
+     * با استفاده از stateIn با چرخه حیات ایمن
+     */
+    val inventoryPurchaseValue: StateFlow<Double> = inventoryRepo.totalInventoryPurchaseValue
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = 0.0
+        )
+
+    /**
+     * جریان داده ارزش کل دارایی‌های انبار بر مبنای قیمت فروش (ریال/تومان)
+     * با استفاده از stateIn با چرخه حیات ایمن
+     */
+    val inventorySalesValue: StateFlow<Double> = inventoryRepo.totalInventorySalesValue
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = 0.0
+        )
 
     private val salesStats = combine(
         invoiceRepo.getTodaySalesSum(todayStr),
@@ -97,13 +122,20 @@ class DashboardViewModel(
         ExpenseStats(todayExp, totalExp ?: 0L)
     }
 
+    private val inventoryValuationStats = combine(
+        inventoryRepo.totalInventoryPurchaseValue,
+        inventoryRepo.totalInventorySalesValue
+    ) { purchase, sales ->
+        InventoryValuationStats(purchase, sales)
+    }
+
     val uiState: StateFlow<DashboardUiState> = combine(
         salesStats,
         treasuryStats,
         alertStats,
         partyStats,
-        expenseStats
-    ) { sales, treasury, alerts, party, expenses ->
+        combine(expenseStats, inventoryValuationStats) { exp, inv -> Pair(exp, inv) }
+    ) { sales, treasury, alerts, party, (expenses, inventory) ->
         DashboardUiState(
             todaySalesAmount = sales.todaySales,
             todayInvoicesCount = sales.todayInvoices,
@@ -119,6 +151,8 @@ class DashboardViewModel(
             lowStockCount = alerts.lowStock,
             dueChequesAlertCount = alerts.dueCheques,
             overCreditPartiesCount = alerts.overCredit,
+            inventoryPurchaseValue = inventory.purchaseValue,
+            inventorySalesValue = inventory.salesValue,
             currentShamsiDate = JalaliDate.now().format(),
             currentShamsiFullDate = JalaliDate.now().getFormattedFullDate(),
             isLoading = false

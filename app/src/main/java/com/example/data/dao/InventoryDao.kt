@@ -83,6 +83,25 @@ interface InventoryDao {
     @Query("SELECT COUNT(*) FROM products WHERE currentStockInSecondary <= minStockThreshold")
     fun getLowStockCount(): Flow<Int>
 
+    // ارزش دارایی‌های انبار (محاسبه بهای تمام شده و ارزش فروش بر مبنای ضرب موجودی در قیمت‌ها)
+    @Query("SELECT COALESCE(SUM(currentStockInSecondary * buyPrice), 0.0) FROM products")
+    fun getTotalInventoryPurchaseValue(): Flow<Double>
+
+    @Query("SELECT COALESCE(SUM(currentStockInSecondary * buyPrice), 0.0) FROM products")
+    fun getInventoryPurchaseValue(): Flow<Double>
+
+    @Query("SELECT COALESCE(SUM(currentStockInSecondary * retailPrice), 0.0) FROM products")
+    fun getTotalInventorySellingValue(): Flow<Double>
+
+    @Query("SELECT COALESCE(SUM(currentStockInSecondary * retailPrice), 0.0) FROM products")
+    fun getTotalInventorySalesValue(): Flow<Double>
+
+    @Query("SELECT COALESCE(SUM(currentStockInSecondary * retailPrice), 0.0) FROM products")
+    fun getInventorySalesValue(): Flow<Double>
+
+    @Query("SELECT COALESCE(SUM(currentStockInSecondary * retailPrice), 0.0) FROM products")
+    fun getInventorySellingValue(): Flow<Double>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertProduct(product: ProductEntity): Long
 

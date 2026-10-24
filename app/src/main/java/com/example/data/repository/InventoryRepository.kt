@@ -20,6 +20,10 @@ class InventoryRepository(
     val recentMovements: Flow<List<InventoryMovementEntity>> = dao.getRecentMovements()
 
     val transferMovements: Flow<List<InventoryMovementEntity>> = dao.getTransferMovements()
+    val totalInventoryPurchaseValue: Flow<Double> = dao.getTotalInventoryPurchaseValue()
+    val totalInventorySalesValue: Flow<Double> = dao.getTotalInventorySellingValue()
+    val inventoryPurchaseValue: Flow<Double> = totalInventoryPurchaseValue
+    val inventorySalesValue: Flow<Double> = totalInventorySalesValue
 
     fun searchProducts(query: String): Flow<List<ProductEntity>> = dao.searchProducts(query)
 

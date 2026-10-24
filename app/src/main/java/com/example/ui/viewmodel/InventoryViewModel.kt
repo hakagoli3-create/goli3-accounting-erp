@@ -27,6 +27,12 @@ class InventoryViewModel(
     val allProducts: StateFlow<List<ProductEntity>> = repository.allProducts
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val inventoryPurchaseValue: StateFlow<Double> = repository.totalInventoryPurchaseValue
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+    val inventorySalesValue: StateFlow<Double> = repository.totalInventorySalesValue
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
     val allCategories: StateFlow<List<String>> = repository.allCategories
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
