@@ -62,7 +62,7 @@ data class IncomeEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
     val categoryId: Long,
     val categoryTitle: String,
-    val amount: Long, // مبلغ به تومان
+    val amount: Long, // مبلغ به تومان (معادل ریالی در اسناد)
     val jalaliDate: String, // ۱۴۰۴/۰۱/۱۵
     val timestamp: Long = System.currentTimeMillis(),
     val depositMethod: String = "BANK", // "CASH" or "BANK"
@@ -71,5 +71,18 @@ data class IncomeEntity(
     val accountName: String = "", // حساب واریزی
     val title: String, // بابت / عنوان درآمد
     val notes: String = "", // توضیحات تکمیلی
-    val voucherId: Long? = null // شناسه سند حسابداری متصل
-)
+    val voucherId: Long? = null, // شناسه سند حسابداری متصل
+    val currencyCode: String = "TOMAN", // واحد ارزی (TOMAN, USD, EUR, TRY, ...)
+    val currencyAmount: Double = 0.0,   // مقدار ارز دریافتی
+    val exchangeRate: Double = 1.0      // نرخ برابری / تبدیل هر واحد ارز به تومان
+) {
+    /**
+     * مشخص‌کننده اینکه آیا درآمد به ارز خارجی (غیر تومانی) ثبت گردیده است
+     */
+    val isForeignCurrency: Boolean
+        get() = currencyCode.isNotBlank() &&
+                !currencyCode.equals("TOMAN", ignoreCase = true) &&
+                !currencyCode.equals("تومان", ignoreCase = true) &&
+                currencyAmount > 0.0
+}
+

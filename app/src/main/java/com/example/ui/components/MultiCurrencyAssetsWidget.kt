@@ -212,8 +212,13 @@ private fun MultiCurrencyAssetsWidgetContent(
                                 )
                             )
                             Spacer(modifier = Modifier.height(4.dp))
+                            val formattedAmount = if (asset.totalAmount % 1.0 == 0.0) {
+                                asset.totalAmount.toLong().formatWithSeparator()
+                            } else {
+                                String.format(java.util.Locale.US, "%,.2f", asset.totalAmount)
+                            }
                             Text(
-                                text = asset.totalAmount.toLong().formatWithSeparator(),
+                                text = formattedAmount,
                                 style = MaterialTheme.typography.bodyLarge.copy(
                                     fontWeight = FontWeight.ExtraBold,
                                     fontSize = 15.sp

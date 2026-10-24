@@ -223,6 +223,30 @@ interface TreasuryDao {
         }
     }
 
+    /**
+     * به روزرسانی ایزوله و خالص موجودی ارزی خزانه‌داری بدون کوچکترین دستکاری در نقدینگی پایه تومانی
+     */
+    @Transaction
+    suspend fun adjustCurrencyBalanceOnly(
+        accountType: String,
+        accountId: Long,
+        currencyCode: String,
+        delta: Double
+    ) {
+        val existing = getCurrencyBalance(accountType, accountId, currencyCode)
+        val newBalance = (existing?.balance ?: 0.0) + delta
+        insertOrUpdateCurrencyBalance(
+            com.example.data.model.TreasuryCurrencyBalanceEntity(
+                id = existing?.id ?: 0L,
+                accountType = accountType,
+                accountId = accountId,
+                currencyCode = currencyCode,
+                balance = newBalance
+            )
+        )
+    }
+
+
     @Transaction
     suspend fun transferBetweenAccounts(
         fromType: String,

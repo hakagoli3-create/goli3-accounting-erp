@@ -206,6 +206,9 @@ class ExpenseAndIncomeViewModel(
         bankAccount: BankAccountEntity?,
         jalaliDate: String,
         notes: String,
+        currencyCode: String = "TOMAN",
+        currencyAmount: Double = 0.0,
+        exchangeRate: Double = 1.0,
         onSuccess: () -> Unit
     ) {
         if (title.isBlank()) {
@@ -213,7 +216,14 @@ class ExpenseAndIncomeViewModel(
             return
         }
         if (amount <= 0) {
-            _alertMessage.value = "مبلغ درآمد باید بزرگتر از صفر باشد."
+            _alertMessage.value = "مبلغ واریزی درآمد باید بزرگتر از صفر باشد."
+            return
+        }
+
+        val normalizedCurrency = if (currencyCode.isBlank()) "TOMAN" else currencyCode.trim().uppercase()
+        val isForeign = !normalizedCurrency.equals("TOMAN", ignoreCase = true) && !normalizedCurrency.equals("تومان", ignoreCase = true)
+        if (isForeign && currencyAmount <= 0.0) {
+            _alertMessage.value = "لطفاً مقدار ارز دریافتی را وارد نمایید."
             return
         }
 
@@ -236,7 +246,10 @@ class ExpenseAndIncomeViewModel(
                     bankAccountId = if (depositMethod == "BANK") bankAccount?.id else null,
                     accountName = accountName,
                     jalaliDate = jalaliDate.ifBlank { JalaliDate.now().toStandardString() },
-                    notes = notes.trim()
+                    notes = notes.trim(),
+                    currencyCode = normalizedCurrency,
+                    currencyAmount = if (isForeign) currencyAmount else 0.0,
+                    exchangeRate = if (isForeign) exchangeRate else 1.0
                 )
                 repository.updateIncome(currentEditing, updated)
                 _alertMessage.value = "سند درآمد با موفقیت ویرایش گردید."
@@ -251,15 +264,23 @@ class ExpenseAndIncomeViewModel(
                     bankAccountId = if (depositMethod == "BANK") bankAccount?.id else null,
                     accountName = accountName,
                     title = title.trim(),
-                    notes = notes.trim()
+                    notes = notes.trim(),
+                    currencyCode = normalizedCurrency,
+                    currencyAmount = if (isForeign) currencyAmount else 0.0,
+                    exchangeRate = if (isForeign) exchangeRate else 1.0
                 )
                 repository.createIncome(newIncome)
-                _alertMessage.value = "سند درآمد با موفقیت ثبت و به حساب واریز شد."
+                _alertMessage.value = if (isForeign) {
+                    "سند درآمد ارزی با موفقیت ثبت و در موجودی تفکیکی خزانه‌داری منعکس شد."
+                } else {
+                    "سند درآمد با موفقیت ثبت و به حساب واریز شد."
+                }
             }
             _editingIncome.value = null
             onSuccess()
         }
     }
+
 
     fun deleteIncome(income: IncomeEntity, onSuccess: () -> Unit = {}) {
         viewModelScope.launch {

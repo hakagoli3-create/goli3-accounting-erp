@@ -11,6 +11,7 @@ import com.example.data.model.JournalEntryEntity
 import com.example.data.model.JournalItemEntity
 import androidx.room.withTransaction
 import com.example.data.database.AppDatabase
+import com.example.util.NumberFormatUtils
 import kotlinx.coroutines.flow.Flow
 
 class ExpenseAndIncomeRepository(
@@ -230,13 +231,28 @@ class ExpenseAndIncomeRepository(
         expenseAndIncomeDao.getIncomesBetweenDates(startDate, endDate)
 
     suspend fun createIncome(income: IncomeEntity): Long = runInTransaction {
+        val isForeign = income.isForeignCurrency
+        val voucherDesc = if (isForeign) {
+            val sym = when (income.currencyCode.trim().uppercase()) {
+                "USD" -> "$"
+                "EUR" -> "€"
+                "TRY" -> "₺"
+                "AED" -> "درهم"
+                "IQD" -> "دینار"
+                else -> income.currencyCode
+            }
+            "درآمد ارزی (${NumberFormatUtils.toPersianDigits(if (income.currencyAmount % 1.0 == 0.0) income.currencyAmount.toLong().toString() else income.currencyAmount.toString())} $sym با نرخ ${NumberFormatUtils.formatPriceOnlyNumber(income.exchangeRate.toLong())}): ${income.categoryTitle} - ${income.title}"
+        } else {
+            "درآمد متفرقه: ${income.categoryTitle} - ${income.title}"
+        }
+
         // 1. Create a double-entry accounting journal voucher
         val voucherId = try {
             val entry = JournalEntryEntity(
                 voucherNumber = 0L,
                 jalaliDate = income.jalaliDate,
                 timestamp = income.timestamp,
-                description = "درآمد متفرقه: ${income.categoryTitle} - ${income.title}",
+                description = voucherDesc,
                 isBalanced = true,
                 status = "FINAL"
             )
@@ -250,7 +266,7 @@ class ExpenseAndIncomeRepository(
                     voucherId = 0L,
                     generalCode = debitGenCode,
                     subsidiaryCode = debitSubCode,
-                    description = "واریز درآمد به ${income.accountName}",
+                    description = "واریز درآمد به ${income.accountName}${if (isForeign) " (معادل ریالی $voucherDesc)" else ""}",
                     debit = income.amount,
                     credit = 0L
                 ),
@@ -258,7 +274,7 @@ class ExpenseAndIncomeRepository(
                     voucherId = 0L,
                     generalCode = 601,
                     subsidiaryCode = 60101,
-                    description = "درآمد ${income.categoryTitle} - ${income.title}",
+                    description = voucherDesc,
                     debit = 0L,
                     credit = income.amount
                 )
@@ -268,11 +284,25 @@ class ExpenseAndIncomeRepository(
             null
         }
 
-        // 2. Adjust Treasury Balance (Add amount)
-        if (income.depositMethod == "CASH" && income.cashDeskId != null) {
-            treasuryDao.updateCashBalance(income.cashDeskId, income.amount)
-        } else if (income.depositMethod == "BANK" && income.bankAccountId != null) {
-            treasuryDao.updateBankBalance(income.bankAccountId, income.amount)
+        // 2. Adjust Treasury Balance
+        if (isForeign) {
+            // درآمد ارزی: ثبت مستقیم در موجودی تفکیکی ارزی خزانه‌داری بدون تغییر نقدینگی ریالی پایه
+            val targetId = if (income.depositMethod == "CASH") income.cashDeskId else income.bankAccountId
+            if (targetId != null) {
+                treasuryDao.adjustCurrencyBalanceOnly(
+                    accountType = income.depositMethod,
+                    accountId = targetId,
+                    currencyCode = income.currencyCode.trim().uppercase(),
+                    delta = income.currencyAmount
+                )
+            }
+        } else {
+            // درآمد ریالی/تومانی پایه: به‌روزرسانی نقدینگی صندوق یا بانک
+            if (income.depositMethod == "CASH" && income.cashDeskId != null) {
+                treasuryDao.updateCashBalance(income.cashDeskId, income.amount)
+            } else if (income.depositMethod == "BANK" && income.bankAccountId != null) {
+                treasuryDao.updateBankBalance(income.bankAccountId, income.amount)
+            }
         }
 
         // 3. Save Income Entity
@@ -280,25 +310,65 @@ class ExpenseAndIncomeRepository(
     }
 
     suspend fun updateIncome(oldIncome: IncomeEntity, newIncome: IncomeEntity) = runInTransaction {
-        // Revert old treasury balance effect
-        if (oldIncome.depositMethod == "CASH" && oldIncome.cashDeskId != null) {
-            treasuryDao.updateCashBalance(oldIncome.cashDeskId, -oldIncome.amount)
-        } else if (oldIncome.depositMethod == "BANK" && oldIncome.bankAccountId != null) {
-            treasuryDao.updateBankBalance(oldIncome.bankAccountId, -oldIncome.amount)
+        val oldIsForeign = oldIncome.isForeignCurrency
+        val newIsForeign = newIncome.isForeignCurrency
+
+        // ۱. بازگشت اثر مانده قدیم خزانه‌داری
+        if (oldIsForeign) {
+            val oldTargetId = if (oldIncome.depositMethod == "CASH") oldIncome.cashDeskId else oldIncome.bankAccountId
+            if (oldTargetId != null) {
+                treasuryDao.adjustCurrencyBalanceOnly(
+                    accountType = oldIncome.depositMethod,
+                    accountId = oldTargetId,
+                    currencyCode = oldIncome.currencyCode.trim().uppercase(),
+                    delta = -oldIncome.currencyAmount
+                )
+            }
+        } else {
+            if (oldIncome.depositMethod == "CASH" && oldIncome.cashDeskId != null) {
+                treasuryDao.updateCashBalance(oldIncome.cashDeskId, -oldIncome.amount)
+            } else if (oldIncome.depositMethod == "BANK" && oldIncome.bankAccountId != null) {
+                treasuryDao.updateBankBalance(oldIncome.bankAccountId, -oldIncome.amount)
+            }
         }
 
-        // Apply new treasury balance effect
-        if (newIncome.depositMethod == "CASH" && newIncome.cashDeskId != null) {
-            treasuryDao.updateCashBalance(newIncome.cashDeskId, newIncome.amount)
-        } else if (newIncome.depositMethod == "BANK" && newIncome.bankAccountId != null) {
-            treasuryDao.updateBankBalance(newIncome.bankAccountId, newIncome.amount)
+        // ۲. اعمال اثر مانده جدید خزانه‌داری
+        if (newIsForeign) {
+            val newTargetId = if (newIncome.depositMethod == "CASH") newIncome.cashDeskId else newIncome.bankAccountId
+            if (newTargetId != null) {
+                treasuryDao.adjustCurrencyBalanceOnly(
+                    accountType = newIncome.depositMethod,
+                    accountId = newTargetId,
+                    currencyCode = newIncome.currencyCode.trim().uppercase(),
+                    delta = newIncome.currencyAmount
+                )
+            }
+        } else {
+            if (newIncome.depositMethod == "CASH" && newIncome.cashDeskId != null) {
+                treasuryDao.updateCashBalance(newIncome.cashDeskId, newIncome.amount)
+            } else if (newIncome.depositMethod == "BANK" && newIncome.bankAccountId != null) {
+                treasuryDao.updateBankBalance(newIncome.bankAccountId, newIncome.amount)
+            }
         }
 
-        // Update connected journal voucher
+        // ۳. به‌روزرسانی سند حسابداری متصل
         if (oldIncome.voucherId != null) {
             try {
                 accountingDao.deleteJournalItemsByVoucher(oldIncome.voucherId)
                 val debitSubCode = if (newIncome.depositMethod == "CASH") 10101 else 10102
+                val voucherDesc = if (newIsForeign) {
+                    val sym = when (newIncome.currencyCode.trim().uppercase()) {
+                        "USD" -> "$"
+                        "EUR" -> "€"
+                        "TRY" -> "₺"
+                        "AED" -> "درهم"
+                        "IQD" -> "دینار"
+                        else -> newIncome.currencyCode
+                    }
+                    "درآمد ارزی (${NumberFormatUtils.toPersianDigits(if (newIncome.currencyAmount % 1.0 == 0.0) newIncome.currencyAmount.toLong().toString() else newIncome.currencyAmount.toString())} $sym با نرخ ${NumberFormatUtils.formatPriceOnlyNumber(newIncome.exchangeRate.toLong())}): ${newIncome.categoryTitle} - ${newIncome.title}"
+                } else {
+                    "درآمد متفرقه: ${newIncome.categoryTitle} - ${newIncome.title}"
+                }
                 val items = listOf(
                     JournalItemEntity(
                         voucherId = oldIncome.voucherId,
@@ -312,7 +382,7 @@ class ExpenseAndIncomeRepository(
                         voucherId = oldIncome.voucherId,
                         generalCode = 601,
                         subsidiaryCode = 60101,
-                        description = "درآمد ${newIncome.categoryTitle} - ${newIncome.title}",
+                        description = voucherDesc,
                         debit = 0L,
                         credit = newIncome.amount
                     )
@@ -327,11 +397,25 @@ class ExpenseAndIncomeRepository(
     }
 
     suspend fun deleteIncome(income: IncomeEntity) = runInTransaction {
+        val isForeign = income.isForeignCurrency
+
         // ۱. بازگشت مانده خزانه‌داری
-        if (income.depositMethod == "CASH" && income.cashDeskId != null) {
-            treasuryDao.updateCashBalance(income.cashDeskId, -income.amount)
-        } else if (income.depositMethod == "BANK" && income.bankAccountId != null) {
-            treasuryDao.updateBankBalance(income.bankAccountId, -income.amount)
+        if (isForeign) {
+            val targetId = if (income.depositMethod == "CASH") income.cashDeskId else income.bankAccountId
+            if (targetId != null) {
+                treasuryDao.adjustCurrencyBalanceOnly(
+                    accountType = income.depositMethod,
+                    accountId = targetId,
+                    currencyCode = income.currencyCode.trim().uppercase(),
+                    delta = -income.currencyAmount
+                )
+            }
+        } else {
+            if (income.depositMethod == "CASH" && income.cashDeskId != null) {
+                treasuryDao.updateCashBalance(income.cashDeskId, -income.amount)
+            } else if (income.depositMethod == "BANK" && income.bankAccountId != null) {
+                treasuryDao.updateBankBalance(income.bankAccountId, -income.amount)
+            }
         }
 
         // ۲. حذف کامل سند حسابداری متصل و تمام آرتیکل‌های آن (حذف قطعی رکوردهای یتیم)
@@ -368,3 +452,4 @@ class ExpenseAndIncomeRepository(
         }
     }
 }
+

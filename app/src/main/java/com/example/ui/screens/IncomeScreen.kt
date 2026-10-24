@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.CurrencyExchange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
@@ -69,6 +70,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -96,8 +98,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.model.AppSecurityAndSettingsManager
 import com.example.data.model.BankAccountEntity
 import com.example.data.model.CashDeskEntity
+import com.example.data.model.CurrencyItem
 import com.example.data.model.IncomeCategoryEntity
 import com.example.data.model.IncomeEntity
 import com.example.ui.components.ErpTopAppBar
@@ -108,6 +112,7 @@ import com.example.ui.viewmodel.CategorySummary
 import com.example.ui.viewmodel.ExpenseAndIncomeViewModel
 import com.example.util.JalaliDate
 import com.example.util.NumberFormatUtils
+import kotlin.math.roundToLong
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -115,6 +120,8 @@ fun IncomeScreen(
     viewModel: ExpenseAndIncomeViewModel
 ) {
     val context = LocalContext.current
+    val securityManager = remember { AppSecurityAndSettingsManager.getInstance(context) }
+    val currencies by securityManager.currencies.collectAsStateWithLifecycle()
 
     val incomes by viewModel.allIncomes.collectAsStateWithLifecycle()
     val categories by viewModel.incomeCategories.collectAsStateWithLifecycle()
@@ -203,6 +210,7 @@ fun IncomeScreen(
                         categories = categories,
                         cashDesks = cashDesks,
                         bankAccounts = bankAccounts,
+                        currencies = currencies,
                         onCancelEditing = {
                             viewModel.setEditingIncome(null)
                             selectedTab = 0
@@ -210,8 +218,20 @@ fun IncomeScreen(
                         onQuickAddCategory = { title, code, desc ->
                             viewModel.addIncomeCategory(title, code, desc)
                         },
-                        onSave = { title, amount, cat, method, cash, bank, date, notes ->
-                            viewModel.saveIncome(title, amount, cat, method, cash, bank, date, notes) {
+                        onSave = { title, amount, cat, method, cash, bank, date, notes, currCode, currAmt, rate ->
+                            viewModel.saveIncome(
+                                title = title,
+                                amount = amount,
+                                category = cat,
+                                depositMethod = method,
+                                cashDesk = cash,
+                                bankAccount = bank,
+                                jalaliDate = date,
+                                notes = notes,
+                                currencyCode = currCode,
+                                currencyAmount = currAmt,
+                                exchangeRate = rate
+                            ) {
                                 selectedTab = 0
                             }
                         }
@@ -786,12 +806,41 @@ private fun IncomeCardItem(
                     }
                 }
 
-                Text(
-                    text = "+${NumberFormatUtils.formatPrice(item.amount)}",
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 14.sp,
-                    color = AccountingDebitGreen
-                )
+                if (item.isForeignCurrency) {
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "+${NumberFormatUtils.formatPrice(item.amount)}",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 14.sp,
+                            color = AccountingDebitGreen
+                        )
+                        val formattedCurAmt = if (item.currencyAmount % 1.0 == 0.0) {
+                            item.currencyAmount.toLong().toString()
+                        } else {
+                            String.format(java.util.Locale.US, "%,.2f", item.currencyAmount)
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = PersianGold.copy(alpha = 0.15f),
+                            border = BorderStroke(0.5.dp, PersianGold.copy(alpha = 0.5f))
+                        ) {
+                            Text(
+                                text = "$formattedCurAmt ${item.currencyCode}",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = PersianGold,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
+                } else {
+                    Text(
+                        text = "+${NumberFormatUtils.formatPrice(item.amount)}",
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 14.sp,
+                        color = AccountingDebitGreen
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(6.dp))
@@ -803,6 +852,24 @@ private fun IncomeCardItem(
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurface
             )
+
+            if (item.isForeignCurrency) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.CurrencyExchange,
+                        contentDescription = null,
+                        tint = PersianGold,
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                        text = "تسعیر: هر ${item.currencyCode} = ${NumberFormatUtils.formatPrice(item.exchangeRate.toLong())} (معادل ریالی در حساب)",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.height(4.dp))
 
@@ -895,6 +962,7 @@ private fun IncomeFormTab(
     categories: List<IncomeCategoryEntity>,
     cashDesks: List<CashDeskEntity>,
     bankAccounts: List<BankAccountEntity>,
+    currencies: List<CurrencyItem> = emptyList(),
     onCancelEditing: () -> Unit,
     onQuickAddCategory: (title: String, code: String, desc: String) -> Unit,
     onSave: (
@@ -905,10 +973,32 @@ private fun IncomeFormTab(
         cashDesk: CashDeskEntity?,
         bankAccount: BankAccountEntity?,
         jalaliDate: String,
-        notes: String
+        notes: String,
+        currencyCode: String,
+        currencyAmount: Double,
+        exchangeRate: Double
     ) -> Unit
 ) {
     var title by remember(editingIncome) { mutableStateOf(editingIncome?.title ?: "") }
+    var selectedCurrencyCode by remember(editingIncome) {
+        mutableStateOf(editingIncome?.currencyCode?.ifBlank { "TOMAN" } ?: "TOMAN")
+    }
+    var currencyAmountStr by remember(editingIncome) {
+        mutableStateOf(
+            if (editingIncome != null && editingIncome.currencyAmount > 0.0) {
+                if (editingIncome.currencyAmount % 1.0 == 0.0) editingIncome.currencyAmount.toLong().toString()
+                else editingIncome.currencyAmount.toString()
+            } else ""
+        )
+    }
+    var exchangeRateStr by remember(editingIncome) {
+        mutableStateOf(
+            if (editingIncome != null && editingIncome.exchangeRate > 0.0 && editingIncome.currencyCode != "TOMAN") {
+                if (editingIncome.exchangeRate % 1.0 == 0.0) editingIncome.exchangeRate.toLong().toString()
+                else editingIncome.exchangeRate.toString()
+            } else ""
+        )
+    }
     var amountStr by remember(editingIncome) { mutableStateOf(editingIncome?.amount?.toString() ?: "") }
     var selectedCategory by remember(editingIncome, categories) {
         mutableStateOf(
@@ -934,6 +1024,17 @@ private fun IncomeFormTab(
     var categoryExpanded by remember { mutableStateOf(false) }
     var accountExpanded by remember { mutableStateOf(false) }
     var showQuickCategoryDialog by remember { mutableStateOf(false) }
+
+    val availableCurrencies = remember(currencies) {
+        if (currencies.isNotEmpty()) currencies else listOf(
+            CurrencyItem("TOMAN", "تومان", "تومان", 1.0, isActive = true, isBaseCurrency = true, isDefaultInvoiceCurrency = true, decimals = 0),
+            CurrencyItem("USD", "دلار آمریکا", "$", 92000.0, isActive = true, isBaseCurrency = false, isDefaultInvoiceCurrency = false, decimals = 2),
+            CurrencyItem("EUR", "یورو", "€", 101000.0, isActive = true, isBaseCurrency = false, isDefaultInvoiceCurrency = false, decimals = 2),
+            CurrencyItem("TRY", "لیر ترکیه", "₺", 2650.0, isActive = true, isBaseCurrency = false, isDefaultInvoiceCurrency = false, decimals = 2),
+            CurrencyItem("AED", "درهم امارات", "د.إ", 25000.0, isActive = true, isBaseCurrency = false, isDefaultInvoiceCurrency = false, decimals = 2),
+            CurrencyItem("IQD", "دینار عراق", "د.ع", 62.0, isActive = true, isBaseCurrency = false, isDefaultInvoiceCurrency = false, decimals = 0)
+        )
+    }
 
     val amountLong = amountStr.toLongOrNull() ?: 0L
 
@@ -1060,13 +1161,194 @@ private fun IncomeFormTab(
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        // Section 2: Amount & Date
-        Text("۲. مبلغ و تاریخ وصول وجه:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+        // Section 2: Amount, Currency & Date
+        Text("۲. مبلغ، واحد ارزی و تاریخ وصول وجه:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+
+        // Currency Selector Row
+        Text("انتخاب واحد ارزی درآمد:", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            availableCurrencies.filter { it.isActive }.forEach { currItem ->
+                val isSelected = selectedCurrencyCode.equals(currItem.code, ignoreCase = true)
+                FilterChip(
+                    selected = isSelected,
+                    onClick = {
+                        if (!isSelected) {
+                            selectedCurrencyCode = currItem.code
+                            if (currItem.code != "TOMAN") {
+                                val defaultRate = currItem.exchangeRateToBase
+                                if (defaultRate > 1.0 && (exchangeRateStr.isBlank() || exchangeRateStr == "0" || exchangeRateStr == "1")) {
+                                    exchangeRateStr = if (defaultRate % 1.0 == 0.0) defaultRate.toLong().toString() else defaultRate.toString()
+                                }
+                                val amt = currencyAmountStr.toDoubleOrNull() ?: 0.0
+                                val r = exchangeRateStr.toDoubleOrNull() ?: defaultRate
+                                val tom = (amt * r).roundToLong()
+                                if (tom > 0) amountStr = tom.toString()
+                            }
+                        }
+                    },
+                    label = {
+                        Text(
+                            text = if (currItem.code == "TOMAN") "تومان (واحد پایه)" else "${currItem.nameFa} (${currItem.symbol})",
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
+                    leadingIcon = if (isSelected) {
+                        { Icon(Icons.Default.CurrencyExchange, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                    } else null,
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = if (currItem.code == "TOMAN") MaterialTheme.colorScheme.primaryContainer else PersianGold.copy(alpha = 0.2f),
+                        selectedLabelColor = if (currItem.code == "TOMAN") MaterialTheme.colorScheme.onPrimaryContainer else PersianGold
+                    )
+                )
+            }
+        }
+
+        // Foreign Currency Card (If non-TOMAN)
+        if (selectedCurrencyCode != "TOMAN") {
+            val currItem = availableCurrencies.find { it.code.equals(selectedCurrencyCode, ignoreCase = true) }
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = PersianGold.copy(alpha = 0.08f)),
+                border = BorderStroke(1.dp, PersianGold.copy(alpha = 0.4f))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.CurrencyExchange,
+                                contentDescription = null,
+                                tint = PersianGold,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "ثبت مقدار ارزی دریافتی (${currItem?.nameFa ?: selectedCurrencyCode})",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = PersianGold
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = PersianGold.copy(alpha = 0.2f)
+                        ) {
+                            Text(
+                                text = selectedCurrencyCode,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = PersianGold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = currencyAmountStr,
+                            onValueChange = { input ->
+                                currencyAmountStr = NumberFormatUtils.toEnglishDigits(input).filter { ch -> ch.isDigit() || ch == '.' }
+                                val amt = currencyAmountStr.toDoubleOrNull() ?: 0.0
+                                val r = exchangeRateStr.toDoubleOrNull() ?: 0.0
+                                val tom = (amt * r).roundToLong()
+                                amountStr = if (tom > 0) tom.toString() else ""
+                            },
+                            label = { Text("مقدار ارز (${currItem?.symbol ?: selectedCurrencyCode})") },
+                            placeholder = { Text("مثال: 100") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("income_currency_amount_input"),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+
+                        OutlinedTextField(
+                            value = exchangeRateStr,
+                            onValueChange = { input ->
+                                exchangeRateStr = NumberFormatUtils.toEnglishDigits(input).filter { ch -> ch.isDigit() || ch == '.' }
+                                val amt = currencyAmountStr.toDoubleOrNull() ?: 0.0
+                                val r = exchangeRateStr.toDoubleOrNull() ?: 0.0
+                                val tom = (amt * r).roundToLong()
+                                amountStr = if (tom > 0) tom.toString() else ""
+                            },
+                            label = { Text("نرخ هر واحد به تومان") },
+                            placeholder = { Text("مثال: 92000") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("income_exchange_rate_input"),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                    }
+
+                    // Calculation Summary Card
+                    val curAmtVal = currencyAmountStr.toDoubleOrNull() ?: 0.0
+                    val rateVal = exchangeRateStr.toDoubleOrNull() ?: 0.0
+                    if (curAmtVal > 0.0 && rateVal > 0.0) {
+                        val computedToman = (curAmtVal * rateVal).roundToLong()
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "محاسبه معادل ریالی:",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "$curAmtVal ${currItem?.symbol ?: selectedCurrencyCode} × ${NumberFormatUtils.formatPrice(rateVal.toLong())} = ${NumberFormatUtils.formatPrice(computedToman)} تومان",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AccountingDebitGreen
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         OutlinedTextField(
             value = amountStr,
-            onValueChange = { amountStr = NumberFormatUtils.toEnglishDigits(it).filter { ch -> ch.isDigit() } },
-            label = { Text("مبلغ واریزی به تومان (الزامی)") },
+            onValueChange = { input ->
+                amountStr = NumberFormatUtils.toEnglishDigits(input).filter { ch -> ch.isDigit() }
+                val tom = amountStr.toLongOrNull() ?: 0L
+                val r = exchangeRateStr.toDoubleOrNull() ?: 0.0
+                if (r > 0 && selectedCurrencyCode != "TOMAN") {
+                    val computed = tom.toDouble() / r
+                    currencyAmountStr = if (computed % 1.0 == 0.0) computed.toLong().toString() else String.format(java.util.Locale.US, "%.2f", computed)
+                }
+            },
+            label = { Text(if (selectedCurrencyCode == "TOMAN") "مبلغ واریزی به تومان (الزامی)" else "معادل واریزی به تومان (محاسبه خودکار / دستی)") },
             placeholder = { Text("مثال: 5000000") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             singleLine = true,
@@ -1305,6 +1587,10 @@ private fun IncomeFormTab(
 
         Spacer(modifier = Modifier.height(8.dp))
 
+        val curAmtDouble = currencyAmountStr.toDoubleOrNull() ?: 0.0
+        val rateDouble = exchangeRateStr.toDoubleOrNull() ?: (if (selectedCurrencyCode == "TOMAN") 1.0 else 0.0)
+        val isCurrencyValid = if (selectedCurrencyCode == "TOMAN") true else (curAmtDouble > 0.0 && rateDouble > 0.0)
+
         // Save Submit Button
         Button(
             onClick = {
@@ -1317,11 +1603,14 @@ private fun IncomeFormTab(
                         selectedCashDesk,
                         selectedBankAccount,
                         jalaliDate,
-                        notes
+                        notes,
+                        selectedCurrencyCode,
+                        if (selectedCurrencyCode == "TOMAN") 0.0 else curAmtDouble,
+                        if (selectedCurrencyCode == "TOMAN") 1.0 else rateDouble
                     )
                 }
             },
-            enabled = title.isNotBlank() && amountLong > 0 && selectedCategory != null &&
+            enabled = title.isNotBlank() && amountLong > 0 && selectedCategory != null && isCurrencyValid &&
                     ((depositMethod == "BANK" && selectedBankAccount != null) || (depositMethod == "CASH" && selectedCashDesk != null)),
             colors = ButtonDefaults.buttonColors(containerColor = AccountingDebitGreen),
             modifier = Modifier
@@ -1762,8 +2051,21 @@ private fun IncomeDetailVoucherDialog(
                     Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         VoucherRow("عنوان و بابت درآمد:", item.title)
                         VoucherRow("دسته‌بندی و سرفصل:", item.categoryTitle)
+                        if (item.isForeignCurrency) {
+                            VoucherRow("واحد ارزی دریافت شده:", item.currencyCode)
+                            val formattedCurAmt = if (item.currencyAmount % 1.0 == 0.0) {
+                                item.currencyAmount.toLong().toString()
+                            } else {
+                                String.format(java.util.Locale.US, "%,.2f", item.currencyAmount)
+                            }
+                            VoucherRow("مقدار ارز دریافتی:", "$formattedCurAmt ${item.currencyCode}")
+                            VoucherRow("نرخ تبدیل ارز به تومان:", "${NumberFormatUtils.formatPrice(item.exchangeRate.toLong())} تومان")
+                        }
                         VoucherRow("روش واریز وجه:", if (item.depositMethod == "CASH") "دریافت نقدی در صندوق" else "واریز مستقیم به حساب بانکی")
                         VoucherRow("حساب / صندوق مقصد:", item.accountName)
+                        if (item.isForeignCurrency) {
+                            VoucherRow("نحوه نگهداری نقدینگی:", "ثبت در موجودی تفکیکی ارزی خزانه‌داری")
+                        }
                         if (item.notes.isNotBlank()) {
                             VoucherRow("توضیحات و پیگیری:", item.notes)
                         }
@@ -1779,7 +2081,11 @@ private fun IncomeDetailVoucherDialog(
                 ) {
                     Column {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("مبلغ وصول شده:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text(
+                                text = if (item.isForeignCurrency) "معادل ریالی در اسناد (تومان):" else "مبلغ وصول شده:",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
                             Text(
                                 text = "+${NumberFormatUtils.formatPrice(item.amount)}",
                                 fontWeight = FontWeight.ExtraBold,

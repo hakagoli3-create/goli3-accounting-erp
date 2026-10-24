@@ -65,7 +65,7 @@ import kotlinx.coroutines.launch
         TreasuryCurrencyBalanceEntity::class,
         StoreSettingsEntity::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -81,7 +81,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun storeSettingsDao(): StoreSettingsDao
 
     companion object {
-        const val DATABASE_VERSION = 9
+        const val DATABASE_VERSION = 10
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
@@ -322,6 +322,14 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                addColumnIfNotExists(db, "incomes", "currencyCode", "TEXT NOT NULL DEFAULT 'TOMAN'")
+                addColumnIfNotExists(db, "incomes", "currencyAmount", "REAL NOT NULL DEFAULT 0.0")
+                addColumnIfNotExists(db, "incomes", "exchangeRate", "REAL NOT NULL DEFAULT 1.0")
+            }
+        }
+
         /**
          * بستن قطعی نمونه جاری Room جهت آماده‌سازی برای عملیات بازیابی (Restore) یا اعمال تنظیمات رمزنگاری
          */
@@ -397,7 +405,7 @@ abstract class AppDatabase : RoomDatabase() {
                             }
                         }
                     })
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                     // Note: fallbackToDestructiveMigration() is strictly removed to guarantee
                     // that financial, user, stock, and accounting data will NEVER be dropped or wiped on app updates.
                     .build()

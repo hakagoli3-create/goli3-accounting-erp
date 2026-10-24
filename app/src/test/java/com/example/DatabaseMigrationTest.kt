@@ -522,4 +522,54 @@ class DatabaseMigrationTest {
         assertTrue("Restore should succeed", restoreResult.isSuccess)
         assertTrue(restoreResult.getOrDefault(false))
     }
+
+    @Test
+    fun `test migration 9 to 10 adds currency columns to incomes`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbName = "test_mig_9_10.db"
+        context.deleteDatabase(dbName)
+
+        val helper = createHelper(context, dbName, 9) { db ->
+            db.execSQL("""
+                CREATE TABLE incomes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    title TEXT NOT NULL,
+                    amount INTEGER NOT NULL,
+                    categoryId INTEGER NOT NULL,
+                    categoryTitle TEXT NOT NULL,
+                    depositMethod TEXT NOT NULL,
+                    cashDeskId INTEGER,
+                    bankAccountId INTEGER,
+                    accountName TEXT NOT NULL,
+                    jalaliDate TEXT NOT NULL,
+                    timestamp INTEGER NOT NULL,
+                    notes TEXT NOT NULL,
+                    recordedBy TEXT NOT NULL
+                )
+            """.trimIndent())
+            db.execSQL("INSERT INTO incomes (id, title, amount, categoryId, categoryTitle, depositMethod, cashDeskId, bankAccountId, accountName, jalaliDate, timestamp, notes, recordedBy) VALUES (1, 'فروش خدمات', 5000000, 1, 'خدمات', 'BANK', NULL, 1, 'بانک ملت', '1405/01/01', 1700000000, '', 'کاربر')")
+        }
+        val db = helper.writableDatabase
+
+        AppDatabase.MIGRATION_9_10.migrate(db)
+
+        db.query("SELECT currencyCode, currencyAmount, exchangeRate FROM incomes WHERE id = 1").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("TOMAN", cursor.getString(0))
+            assertEquals(0.0, cursor.getDouble(1), 0.001)
+            assertEquals(1.0, cursor.getDouble(2), 0.001)
+        }
+
+        // Test inserting a foreign currency record into the migrated table
+        db.execSQL("INSERT INTO incomes (id, title, amount, categoryId, categoryTitle, depositMethod, cashDeskId, bankAccountId, accountName, jalaliDate, timestamp, notes, recordedBy, currencyCode, currencyAmount, exchangeRate) VALUES (2, 'درآمد دلاری', 9200000, 1, 'خدمات بین‌الملل', 'CASH', 1, NULL, 'صندوق ارزی', '1405/01/02', 1700000100, '', 'کاربر', 'USD', 100.0, 92000.0)")
+        db.query("SELECT currencyCode, currencyAmount, exchangeRate, amount FROM incomes WHERE id = 2").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("USD", cursor.getString(0))
+            assertEquals(100.0, cursor.getDouble(1), 0.001)
+            assertEquals(92000.0, cursor.getDouble(2), 0.001)
+            assertEquals(9200000L, cursor.getLong(3))
+        }
+
+        helper.close()
+    }
 }

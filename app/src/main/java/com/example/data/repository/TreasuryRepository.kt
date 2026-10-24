@@ -180,5 +180,18 @@ class TreasuryRepository(
             deltaInBase = deltaInBase
         )
     }
+
+    /**
+     * به روزرسانی ایزوله و مستقل موجودی ارزی خزانه‌داری بدون اثرگذاری بر نقدینگی ریالی
+     */
+    suspend fun adjustCurrencyBalanceOnly(
+        accountType: String,
+        accountId: Long,
+        currencyCode: String,
+        delta: Double
+    ) {
+        dao.adjustCurrencyBalanceOnly(accountType, accountId, currencyCode, delta)
+    }
 }
+
 
