@@ -170,6 +170,22 @@ interface TreasuryDao {
                            )
                        ) AS REAL
                    ) AS amount
+
+            UNION ALL
+
+            -- ۶. حساب‌های بدهکاران (مشتریان بدهکار / مطالبات تجاری و جاری) به عنوان دارایی جاری
+            SELECT 'TOMAN' AS currencyType,
+                   CAST(COALESCE(SUM(currentBalance), 0) AS REAL) AS amount
+            FROM parties
+            WHERE currentBalance > 0
+
+            UNION ALL
+
+            -- ۷. حساب‌های بستانکاران (تامین‌کنندگان بستانکار / بدهی‌ها) به عنوان بدهی از مجموع دارایی‌ها کسر گردند
+            SELECT 'TOMAN' AS currencyType,
+                   CAST(-COALESCE(SUM(ABS(currentBalance)), 0) AS REAL) AS amount
+            FROM parties
+            WHERE currentBalance < 0
         )
         SELECT currencyType, 
                COALESCE(SUM(amount), 0.0) AS totalAmount 

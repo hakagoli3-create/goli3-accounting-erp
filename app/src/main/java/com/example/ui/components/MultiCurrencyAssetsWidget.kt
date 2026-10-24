@@ -142,13 +142,23 @@ private fun MultiCurrencyAssetsWidgetContent(
                             modifier = Modifier.size(18.dp)
                         )
                     }
-                    Text(
-                        text = "گزارش کل دارایی‌ها به تفکیک ارز",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
+                    Column {
+                        Text(
+                            text = "گزارش کل دارایی‌ها به تفکیک ارز",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
+                            )
                         )
-                    )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "دارایی خالص / سرمایه واقعی (نقدینگی + مطالبات - بدهی‌ها)",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = TextDarkSecondary,
+                                fontSize = 10.sp
+                            )
+                        )
+                    }
                 }
 
                 Surface(

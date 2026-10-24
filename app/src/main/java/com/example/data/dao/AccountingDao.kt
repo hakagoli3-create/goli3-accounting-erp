@@ -114,6 +114,12 @@ interface AccountingDao {
                     )
                 ) AS REAL
             ) AS amount
+            UNION ALL
+            -- حساب‌های بدهکاران (مشتریان بدهکار / مطالبات جاری)
+            SELECT CAST(COALESCE(SUM(currentBalance), 0) AS REAL) AS amount FROM parties WHERE currentBalance > 0
+            UNION ALL
+            -- حساب‌های بستانکاران (تامین‌کنندگان بستانکار / بدهی‌ها)
+            SELECT CAST(-COALESCE(SUM(ABS(currentBalance)), 0) AS REAL) AS amount FROM parties WHERE currentBalance < 0
         )
         SELECT 'تومان' AS currencyType,
                COALESCE(SUM(amount), 0.0) AS totalAmount

@@ -33,11 +33,12 @@ class TotalAssetsByCurrencyLiveQueryTest {
     fun testLiveTotalAssetsByCurrencyIncludesCashBankAndForeignCurrencies() = runBlocking {
         val treasuryDao = db.treasuryDao()
 
-        // پاک‌سازی جدول‌های نقدینگی برای اجرای ایزوله تست
+        // پاک‌سازی جدول‌های نقدینگی و طرف‌حساب‌ها برای اجرای ایزوله تست
         val sqlite = db.openHelper.writableDatabase
         sqlite.execSQL("DELETE FROM treasury_currency_balances")
         sqlite.execSQL("DELETE FROM cash_desks")
         sqlite.execSQL("DELETE FROM bank_accounts")
+        sqlite.execSQL("DELETE FROM parties")
 
         // ۱. افزودن صندوق با موجودی اول‌دوره ۵,۰۰۰,۰۰۰ تومان
         val cashDeskId = treasuryDao.insertCashDesk(
@@ -104,5 +105,76 @@ class TotalAssetsByCurrencyLiveQueryTest {
 
         val expectedUpdatedToman = expectedTotalToman + 3000000.0
         assertEquals(expectedUpdatedToman, updatedAssetsMap["TOMAN"] ?: 0.0, 0.01)
+    }
+
+    @Test
+    fun testNetWorthIncludesDebtorsAndDeductsCreditorsReactively() = runBlocking {
+        val treasuryDao = db.treasuryDao()
+        val partyDao = db.partyDao()
+
+        // پاک‌سازی جدول‌های نقدینگی و طرف‌حساب‌ها برای اجرای ایزوله تست
+        val sqlite = db.openHelper.writableDatabase
+        sqlite.execSQL("DELETE FROM treasury_currency_balances")
+        sqlite.execSQL("DELETE FROM parties")
+        sqlite.execSQL("DELETE FROM journal_items")
+        sqlite.execSQL("DELETE FROM journal_entries")
+
+        // نقدینگی اولیه: تنظیم ۱۰,۰۰۰,۰۰۰ تومان در صندوق
+        val cashDesks = treasuryDao.getAllCashDesks().first()
+        val cashDeskId = if (cashDesks.isNotEmpty()) {
+            val id = cashDesks[0].id
+            treasuryDao.updateCashBalance(id, 10_000_000L - cashDesks[0].currentBalance)
+            id
+        } else {
+            treasuryDao.insertCashDesk(
+                CashDeskEntity(
+                    id = 1L,
+                    code = "CSH-NETWORTH",
+                    name = "صندوق آزمایشی",
+                    currentBalance = 10_000_000L
+                )
+            )
+        }
+
+        // ۱. بررسی مقدار پایه (فقط نقدینگی = ۱۰ میلیون تومان)
+        var assets = treasuryDao.observeTotalAssetsByCurrency().first()
+        var tomanNetWorth = assets.firstOrNull { it.currencyType.uppercase() in listOf("TOMAN", "تومان") }?.totalAmount ?: 0.0
+        assertEquals(10_000_000.0, tomanNetWorth, 0.01)
+
+        // ۲. اضافه شدن مشتری بدهکار (طلب/مطالبات جاری به مبلغ ۷,۰۰۰,۰۰۰ تومان)
+        val customerId = partyDao.insertParty(
+            com.example.data.model.PartyEntity(
+                code = "CUST-01",
+                name = "مشتری بدهکار شماره یک",
+                partyType = "CUSTOMER",
+                currentBalance = 7_000_000L // بدهکار به ما
+            )
+        )
+
+        // باید دارایی خالص بلافاصله واکنشی به ۱۷ میلیون تومان افزایش یابد (۱۰M نقد + ۷M مطالبات)
+        assets = treasuryDao.observeTotalAssetsByCurrency().first()
+        tomanNetWorth = assets.firstOrNull { it.currencyType.uppercase() in listOf("TOMAN", "تومان") }?.totalAmount ?: 0.0
+        assertEquals(17_000_000.0, tomanNetWorth, 0.01)
+
+        // ۳. اضافه شدن تامین‌کننده بستانکار (بدهی جاری به مبلغ ۴,۰۰۰,۰۰۰ تومان)
+        val supplierId = partyDao.insertParty(
+            com.example.data.model.PartyEntity(
+                code = "SUPP-01",
+                name = "تامین‌کننده بستانکار اصلی",
+                partyType = "SUPPLIER",
+                currentBalance = -4_000_000L // بستانکار از ما
+            )
+        )
+
+        // باید دارایی خالص بلافاصله واکنشی به ۱۳ میلیون تومان کاهش یابد (۱۰M + ۷M - ۴M)
+        assets = treasuryDao.observeTotalAssetsByCurrency().first()
+        tomanNetWorth = assets.firstOrNull { it.currencyType.uppercase() in listOf("TOMAN", "تومان") }?.totalAmount ?: 0.0
+        assertEquals(13_000_000.0, tomanNetWorth, 0.01)
+
+        // ۴. تغییر واکنشی مانده بدهکار (مشتری بدهی خود را ۲,۰۰۰,۰۰۰ افزایش می‌دهد)
+        partyDao.updatePartyBalance(customerId, 2_000_000L) // مانده به ۹ میلیون می‌رسد
+        assets = treasuryDao.observeTotalAssetsByCurrency().first()
+        tomanNetWorth = assets.firstOrNull { it.currencyType.uppercase() in listOf("TOMAN", "تومان") }?.totalAmount ?: 0.0
+        assertEquals(15_000_000.0, tomanNetWorth, 0.01) // ۱۰M + ۹M - ۴M = ۱۵M
     }
 }
