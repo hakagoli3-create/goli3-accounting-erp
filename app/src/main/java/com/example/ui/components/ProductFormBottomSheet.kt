@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.PriceChange
 import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Warehouse
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -124,6 +125,7 @@ fun ProductFormBottomSheet(
     var name by remember { mutableStateOf(productToEdit?.name ?: "") }
     var code by remember { mutableStateOf(productToEdit?.code ?: "") }
     var barcode by remember { mutableStateOf(productToEdit?.barcode ?: "") }
+    var showBarcodeScanner by remember { mutableStateOf(false) }
     var category by remember { mutableStateOf(productToEdit?.category ?: "") }
     var imageUri by remember { mutableStateOf(productToEdit?.imageUri) }
 
@@ -385,9 +387,22 @@ fun ProductFormBottomSheet(
                                 value = barcode,
                                 onValueChange = { barcode = it },
                                 label = { Text("بارکد ملی / تجاری") },
-                                leadingIcon = { Icon(Icons.Default.QrCode, contentDescription = null, tint = TextDarkMuted) },
+                                leadingIcon = {
+                                    IconButton(
+                                        onClick = { showBarcodeScanner = true },
+                                        modifier = Modifier.testTag("scan_product_barcode_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.QrCodeScanner,
+                                            contentDescription = "اسکن بارکد با دوربین",
+                                            tint = MatteGold
+                                        )
+                                    }
+                                },
                                 shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.weight(1.2f)
+                                modifier = Modifier
+                                    .weight(1.2f)
+                                    .testTag("product_form_barcode_input")
                             )
                         }
                         Spacer(modifier = Modifier.height(8.dp))
@@ -651,6 +666,16 @@ fun ProductFormBottomSheet(
 
                 Spacer(modifier = Modifier.height(28.dp))
             }
+        }
+
+        if (showBarcodeScanner) {
+            BarcodeScannerDialog(
+                onDismiss = { showBarcodeScanner = false },
+                onBarcodeScanned = { scannedCode ->
+                    barcode = scannedCode
+                    showBarcodeScanner = false
+                }
+            )
         }
     }
 }

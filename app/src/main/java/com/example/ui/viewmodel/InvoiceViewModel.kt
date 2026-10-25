@@ -523,14 +523,24 @@ class InvoiceViewModel(
         _selectedInvoiceForDetails.value = null
     }
 
-    fun scanBarcode(barcode: String) {
-        viewModelScope.launch {
-            val product = inventoryRepo.getProductByBarcode(barcode.trim())
-            if (product != null) {
-                addToCart(product, isPrimary = false)
+    fun scanBarcode(barcode: String): kotlinx.coroutines.Job = viewModelScope.launch {
+        val clean = barcode.trim()
+        if (clean.isBlank()) return@launch
+        val product = com.example.util.InvoiceBarcodeHelper.findProductByBarcode(
+            clean,
+            inventoryRepo,
+            allProducts.value
+        )
+        if (product != null) {
+            val alreadyInCart = _cartItems.value.any { it.product.id == product.id }
+            addToCart(product, isPrimary = false)
+            if (alreadyInCart) {
+                _alertMessage.value = "تعداد کالای «${product.name}» در فاکتور یک واحد افزایش یافت."
             } else {
-                _alertMessage.value = "کالایی با بارکد $barcode در انبار یا فروشگاه یافت نشد."
+                _alertMessage.value = "کالای «${product.name}» با موفقیت به فاکتور افزوده شد."
             }
+        } else {
+            _alertMessage.value = "کالایی با بارکد یا کد «$clean» در انبار یا فروشگاه یافت نشد."
         }
     }
 

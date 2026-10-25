@@ -37,12 +37,15 @@ import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
+import com.example.ui.components.BarcodeScannerDialog
 import com.example.ui.components.QuickAddPartyDialog
 import com.example.ui.components.QuickAddOrEditProductDialog
 import androidx.compose.material3.Button
@@ -336,6 +339,7 @@ fun InvoiceScreen(
                     onPricingModeChange = { viewModel.setPricingMode(it) },
                     onSelectParty = { viewModel.selectParty(it) },
                     onAddToCart = { p, isPrimary -> viewModel.addToCart(p, isPrimary = isPrimary) },
+                    onScanBarcode = { code -> viewModel.scanBarcode(code) },
                     onToggleUnit = { idx -> viewModel.toggleCartItemUnit(idx) },
                     onUpdateQuantity = { idx, q -> viewModel.updateCartItemQuantity(idx, q) },
                     onUpdateUnitPrice = { idx, p -> viewModel.updateCartItemUnitPrice(idx, p) },
@@ -1518,6 +1522,7 @@ private fun InvoiceEditorContent(
     onPricingModeChange: (String) -> Unit,
     onSelectParty: (PartyEntity?) -> Unit,
     onAddToCart: (ProductEntity, Boolean) -> Unit,
+    onScanBarcode: (String) -> Unit = {},
     onToggleUnit: (Int) -> Unit,
     onUpdateQuantity: (Int, Double) -> Unit,
     onUpdateUnitPrice: (Int, Long) -> Unit = { _, _ -> },
@@ -1536,6 +1541,8 @@ private fun InvoiceEditorContent(
     var selectedProductToAdd by remember { mutableStateOf<ProductEntity?>(null) }
     var showQuickAddPartyDialog by remember { mutableStateOf(false) }
     var showQuickAddProductDialog by remember { mutableStateOf(false) }
+    var showCameraScanner by remember { mutableStateOf(false) }
+    var barcodeQueryText by remember { mutableStateOf("") }
     var editingCartItemIndex by remember { mutableStateOf<Int?>(null) }
     var usePrimaryUnit by remember { mutableStateOf(true) } // کارتن vs عدد
     var discountText by remember { mutableStateOf(if (discount > 0) discount.toString() else "") }
@@ -2020,7 +2027,104 @@ private fun InvoiceEditorContent(
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.height(4.dp))
+                    // اسکن و جست‌وجوی سریع بارکد کالا
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = barcodeQueryText,
+                            onValueChange = { barcodeQueryText = it },
+                            placeholder = { Text("ورود یا اسکن بارکد / کد کالا...", fontSize = 12.sp) },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.QrCode,
+                                    contentDescription = null,
+                                    tint = MatteGold,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            },
+                            trailingIcon = {
+                                if (barcodeQueryText.isNotBlank()) {
+                                    IconButton(onClick = { barcodeQueryText = "" }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "پاک کردن",
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = {
+                                if (barcodeQueryText.isNotBlank()) {
+                                    onScanBarcode(barcodeQueryText.trim())
+                                    barcodeQueryText = ""
+                                }
+                            }),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("invoice_barcode_search_input")
+                        )
+
+                        // دکمه اسکن با دوربین
+                        Button(
+                            onClick = { showCameraScanner = true },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = NavyPrimary,
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                            modifier = Modifier.testTag("invoice_open_camera_scanner_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.QrCodeScanner,
+                                contentDescription = "اسکن بارکد با دوربین",
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("اسکن", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        if (barcodeQueryText.isNotBlank()) {
+                            Button(
+                                onClick = {
+                                    onScanBarcode(barcodeQueryText.trim())
+                                    barcodeQueryText = ""
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MatteGold,
+                                    contentColor = NavyPrimary
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                                modifier = Modifier.testTag("invoice_submit_barcode_btn")
+                            ) {
+                                Text("ثبت", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        HorizontalDivider(modifier = Modifier.weight(1f), color = CleanBorder)
+                        Text(
+                            text = " یا انتخاب دستی از انبار ",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        HorizontalDivider(modifier = Modifier.weight(1f), color = CleanBorder)
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     ExposedDropdownMenuBox(
                         expanded = productMenuExpanded,
@@ -2287,6 +2391,16 @@ private fun InvoiceEditorContent(
                 onQuickAddOrUpdateProduct(product) { saved ->
                     selectedProductToAdd = saved
                 }
+            }
+        )
+    }
+
+    if (showCameraScanner) {
+        BarcodeScannerDialog(
+            onDismiss = { showCameraScanner = false },
+            onBarcodeScanned = { scannedCode ->
+                onScanBarcode(scannedCode)
+                showCameraScanner = false
             }
         )
     }

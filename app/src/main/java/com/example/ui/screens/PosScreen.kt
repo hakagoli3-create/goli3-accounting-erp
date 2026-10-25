@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -147,6 +148,7 @@ fun PosScreen(
     var selectedTab by remember { mutableIntStateOf(0) } // 0: کاتالوگ محصولات, 1: سبد خرید
     var customerMenuExpanded by remember { mutableStateOf(false) }
     var showSettlementDialog by remember { mutableStateOf(false) }
+    var showCameraScanner by remember { mutableStateOf(false) }
     var customDiscountText by remember { mutableStateOf("") }
 
     LaunchedEffect(alertMessage) {
@@ -282,6 +284,7 @@ fun PosScreen(
                                 searchQuery = ""
                                 focusManager.clearFocus()
                             },
+                            onOpenScanner = { showCameraScanner = true },
                             categories = categories,
                             products = products,
                             selectedCategory = selectedCategory,
@@ -468,6 +471,7 @@ fun PosScreen(
                                         searchQuery = ""
                                         focusManager.clearFocus()
                                     },
+                                    onOpenScanner = { showCameraScanner = true },
                                     categories = categories,
                                     products = products,
                                     selectedCategory = selectedCategory,
@@ -679,6 +683,16 @@ fun PosScreen(
             onDismiss = { viewModel.closeReceiptPreview() }
         )
     }
+
+    if (showCameraScanner) {
+        com.example.ui.components.BarcodeScannerDialog(
+            onDismiss = { showCameraScanner = false },
+            onBarcodeScanned = { scannedCode ->
+                viewModel.scanBarcode(scannedCode)
+                showCameraScanner = false
+            }
+        )
+    }
 }
 
 /**
@@ -689,6 +703,7 @@ private fun PosSearchAndCategoryHeader(
     searchQuery: String,
     onSearchChange: (String) -> Unit,
     onBarcodeSubmitted: (String) -> Unit,
+    onOpenScanner: () -> Unit,
     categories: List<String>,
     products: List<ProductEntity>,
     selectedCategory: String,
@@ -757,13 +772,34 @@ private fun PosSearchAndCategoryHeader(
                         .testTag("pos_search_input")
                 )
 
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(6.dp))
 
-                // دکمه اسکن و ثبت بارکد
+                // دکمه اسکن با دوربین
+                IconButton(
+                    onClick = onOpenScanner,
+                    modifier = Modifier
+                        .size(42.dp)
+                        .background(NavyPrimary.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+                        .border(1.dp, NavyPrimary.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
+                        .testTag("pos_open_camera_scanner_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.QrCodeScanner,
+                        contentDescription = "اسکن بارکد با دوربین",
+                        tint = NavyPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                // دکمه ثبت
                 Button(
                     onClick = {
                         if (searchQuery.isNotBlank()) {
                             onBarcodeSubmitted(searchQuery)
+                        } else {
+                            onOpenScanner()
                         }
                     },
                     colors = ButtonDefaults.buttonColors(
@@ -775,7 +811,7 @@ private fun PosSearchAndCategoryHeader(
                     modifier = Modifier.testTag("pos_scan_barcode_button")
                 ) {
                     Icon(
-                        imageVector = Icons.Default.QrCodeScanner,
+                        imageVector = Icons.Default.Search,
                         contentDescription = "ثبت بارکد",
                         modifier = Modifier.size(18.dp)
                     )
