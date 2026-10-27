@@ -44,7 +44,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.widthIn
 import com.example.data.model.InvoiceWithItems
+import com.example.data.model.ProductEntity
 import com.example.data.model.StoreProfile
 import com.example.ui.theme.AccountingCreditRed
 import com.example.ui.theme.AccountingDebitGreen
@@ -55,6 +58,7 @@ import com.example.util.NumberFormatUtils
 fun OfficialInvoiceDetailsDialog(
     invoiceWithItems: InvoiceWithItems,
     storeProfile: StoreProfile,
+    products: List<ProductEntity> = emptyList(),
     onDismiss: () -> Unit,
     onExportPdf: () -> Unit,
     onExportCsv: () -> Unit,
@@ -224,44 +228,66 @@ fun OfficialInvoiceDetailsDialog(
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
                 ) {
-                    Column(modifier = Modifier.padding(8.dp)) {
+                    val tableScrollState = rememberScrollState()
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(tableScrollState)
+                            .widthIn(min = 640.dp)
+                            .padding(8.dp)
+                    ) {
                         // Header Row with official commercial columns
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(Color(0xFF37474F), RoundedCornerShape(6.dp))
                                 .padding(vertical = 8.dp, horizontal = 6.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("ردیف", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.width(28.dp))
-                            Text("نام کالا یا خدمات", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(2f))
-                            Text("تعداد", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(0.7f))
-                            Text("واحد", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(0.7f))
-                            Text("فی (تومان)", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(1.1f))
-                            Text("مبلغ کل (تومان)", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(1.2f))
+                            Text("ردیف", fontWeight = FontWeight.Bold, fontSize = 10.5.sp, color = Color.White, modifier = Modifier.width(36.dp))
+                            Text("نام کالا یا خدمات", fontWeight = FontWeight.Bold, fontSize = 10.5.sp, color = Color.White, modifier = Modifier.width(180.dp))
+                            Text("کد کالا", fontWeight = FontWeight.Bold, fontSize = 10.5.sp, color = Color.White, modifier = Modifier.width(80.dp))
+                            Text("تعداد", fontWeight = FontWeight.Bold, fontSize = 10.5.sp, color = Color.White, modifier = Modifier.width(65.dp))
+                            Text("واحد (در کارتن)", fontWeight = FontWeight.Bold, fontSize = 10.5.sp, color = Color.White, modifier = Modifier.width(90.dp))
+                            Text("فی (تومان)", fontWeight = FontWeight.Bold, fontSize = 10.5.sp, color = Color.White, modifier = Modifier.width(100.dp))
+                            Text("مبلغ کل (تومان)", fontWeight = FontWeight.Bold, fontSize = 10.5.sp, color = Color.White, modifier = Modifier.width(114.dp))
                         }
 
                         items.forEachIndexed { idx, itm ->
                             val rowBg = if (idx % 2 == 0) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
+                            val prod = products.find { it.id == itm.productId }
+                            val prodCode = prod?.code?.ifBlank { null }
+                                ?: itm.barcode.ifBlank { "PRD-${itm.productId}" }
+                            val conversionRate = prod?.conversionRate ?: 1.0
+                            val rateStr = if (conversionRate % 1.0 == 0.0) conversionRate.toInt().toString() else conversionRate.toString()
+                            val unitDisplay = if (conversionRate > 1.0) {
+                                if (itm.unitName == prod?.primaryUnit) {
+                                    "${itm.unitName} (${NumberFormatUtils.toPersianDigits(rateStr)} تایی)"
+                                } else {
+                                    "${itm.unitName} (کارتن: ${NumberFormatUtils.toPersianDigits(rateStr)})"
+                                }
+                            } else {
+                                itm.unitName
+                            }
+
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .background(rowBg)
                                     .padding(vertical = 7.dp, horizontal = 6.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(NumberFormatUtils.toPersianDigits((idx + 1).toString()), fontSize = 10.sp, modifier = Modifier.width(28.dp))
-                                Text(itm.productName, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, modifier = Modifier.weight(2f))
+                                Text(NumberFormatUtils.toPersianDigits((idx + 1).toString()), fontSize = 10.5.sp, modifier = Modifier.width(36.dp))
+                                Text(itm.productName, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, modifier = Modifier.width(180.dp))
+                                Text(NumberFormatUtils.toPersianDigits(prodCode), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(80.dp))
                                 val qtyStr = if (itm.quantity % 1.0 == 0.0) itm.quantity.toLong().toString() else itm.quantity.toString()
-                                Text(NumberFormatUtils.toPersianDigits(qtyStr), fontSize = 10.sp, modifier = Modifier.weight(0.7f))
-                                Text(itm.unitName, fontSize = 10.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(0.7f))
-                                Text(NumberFormatUtils.formatPriceOnlyNumber(itm.unitPrice), fontSize = 10.sp, modifier = Modifier.weight(1.1f))
-                                Text(NumberFormatUtils.formatPriceOnlyNumber(itm.totalPrice), fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(1.2f))
+                                Text(NumberFormatUtils.toPersianDigits(qtyStr), fontSize = 10.5.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(65.dp))
+                                Text(unitDisplay, fontSize = 10.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.width(90.dp))
+                                Text(NumberFormatUtils.formatPriceOnlyNumber(itm.unitPrice), fontSize = 10.5.sp, modifier = Modifier.width(100.dp))
+                                Text(NumberFormatUtils.formatPriceOnlyNumber(itm.totalPrice), fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.width(114.dp))
                             }
                             if (idx < items.size - 1) {
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))

@@ -53,7 +53,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.widthIn
 import com.example.data.model.InvoiceWithItems
+import com.example.data.model.ProductEntity
 import com.example.data.model.StoreProfile
 import com.example.ui.theme.AccountingCreditRed
 import com.example.ui.theme.AccountingDebitGreen
@@ -69,6 +72,7 @@ import com.example.util.NumberFormatUtils
 fun OfficialInvoicePrintPreviewDialog(
     invoiceWithItems: InvoiceWithItems,
     storeProfile: StoreProfile,
+    products: List<ProductEntity> = emptyList(),
     onDismiss: () -> Unit,
     onSwitchToThermalReceipt: () -> Unit = {}
 ) {
@@ -205,7 +209,7 @@ fun OfficialInvoicePrintPreviewDialog(
 
                     Button(
                         onClick = {
-                            val pdf = ExportHelper.exportInvoicePdf(context, invoiceWithItems, storeProfile)
+                            val pdf = ExportHelper.exportInvoicePdf(context, invoiceWithItems, storeProfile, products)
                             if (pdf != null) {
                                 ExportHelper.shareFile(context, pdf, "application/pdf", "اشتراک فاکتور PDF")
                             }
@@ -424,74 +428,106 @@ fun OfficialInvoicePrintPreviewDialog(
                         Spacer(modifier = Modifier.height(12.dp))
 
                         // Items Table Header with official commercial columns
-                        Row(
+                        val previewScrollState = rememberScrollState()
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(Color(0xFF37474F), RoundedCornerShape(6.dp))
-                                .padding(vertical = 7.dp, horizontal = 6.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                                .horizontalScroll(previewScrollState)
+                                .widthIn(min = 600.dp)
                         ) {
-                            Text("ردیف", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.width(28.dp), textAlign = TextAlign.Center)
-                            Text("نام کالا یا خدمات", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(2.1f))
-                            Text("تعداد", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(0.7f), textAlign = TextAlign.Center)
-                            Text("واحد", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(0.7f), textAlign = TextAlign.Center)
-                            Text("فی (تومان)", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(1.1f), textAlign = TextAlign.End)
-                            Text("مبلغ کل (تومان)", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(1.3f), textAlign = TextAlign.End)
-                        }
-
-                        // Items Rows
-                        items.forEachIndexed { idx, itm ->
-                            val rowBg = if (idx % 2 == 0) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(rowBg)
-                                    .padding(vertical = 6.dp, horizontal = 6.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
+                                    .background(Color(0xFF37474F), RoundedCornerShape(6.dp))
+                                    .padding(vertical = 7.dp, horizontal = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = NumberFormatUtils.toPersianDigits((idx + 1).toString()),
-                                    fontSize = 10.sp,
-                                    modifier = Modifier.width(28.dp),
-                                    textAlign = TextAlign.Center
-                                )
-                                Column(modifier = Modifier.weight(2.1f)) {
-                                    Text(itm.productName, fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
-                                    if (itm.barcode.isNotBlank()) {
-                                        Text("بارکد: ${itm.barcode}", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-                                val qtyStr = if (itm.quantity % 1.0 == 0.0) itm.quantity.toLong().toString() else itm.quantity.toString()
-                                Text(
-                                    text = NumberFormatUtils.toPersianDigits(qtyStr),
-                                    fontSize = 10.sp,
-                                    modifier = Modifier.weight(0.7f),
-                                    textAlign = TextAlign.Center
-                                )
-                                Text(
-                                    text = itm.unitName,
-                                    fontSize = 10.sp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.weight(0.7f),
-                                    textAlign = TextAlign.Center
-                                )
-                                Text(
-                                    text = NumberFormatUtils.formatPriceOnlyNumber(itm.unitPrice),
-                                    fontSize = 10.sp,
-                                    modifier = Modifier.weight(1.1f),
-                                    textAlign = TextAlign.End
-                                )
-                                Text(
-                                    text = NumberFormatUtils.formatPriceOnlyNumber(itm.totalPrice),
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp,
-                                    modifier = Modifier.weight(1.3f),
-                                    textAlign = TextAlign.End
-                                )
+                                Text("ردیف", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.width(32.dp), textAlign = TextAlign.Center)
+                                Text("نام کالا یا خدمات", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.width(170.dp))
+                                Text("کد کالا", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.width(75.dp), textAlign = TextAlign.Center)
+                                Text("تعداد", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.width(60.dp), textAlign = TextAlign.Center)
+                                Text("واحد (در کارتن)", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.width(85.dp), textAlign = TextAlign.Center)
+                                Text("فی (تومان)", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.width(95.dp), textAlign = TextAlign.End)
+                                Text("مبلغ کل (تومان)", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.width(108.dp), textAlign = TextAlign.End)
                             }
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+
+                            // Items Rows
+                            items.forEachIndexed { idx, itm ->
+                                val rowBg = if (idx % 2 == 0) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
+                                val prod = products.find { it.id == itm.productId }
+                                val prodCode = prod?.code?.ifBlank { null }
+                                    ?: itm.barcode.ifBlank { "PRD-${itm.productId}" }
+                                val conversionRate = prod?.conversionRate ?: 1.0
+                                val rateStr = if (conversionRate % 1.0 == 0.0) conversionRate.toInt().toString() else conversionRate.toString()
+                                val unitDisplay = if (conversionRate > 1.0) {
+                                    if (itm.unitName == prod?.primaryUnit) {
+                                        "${itm.unitName} (${NumberFormatUtils.toPersianDigits(rateStr)} تایی)"
+                                    } else {
+                                        "${itm.unitName} (کارتن: ${NumberFormatUtils.toPersianDigits(rateStr)})"
+                                    }
+                                } else {
+                                    itm.unitName
+                                }
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(rowBg)
+                                        .padding(vertical = 6.dp, horizontal = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = NumberFormatUtils.toPersianDigits((idx + 1).toString()),
+                                        fontSize = 10.sp,
+                                        modifier = Modifier.width(32.dp),
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Text(
+                                        text = itm.productName,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 10.5.sp,
+                                        modifier = Modifier.width(170.dp)
+                                    )
+                                    Text(
+                                        text = NumberFormatUtils.toPersianDigits(prodCode),
+                                        fontSize = 9.5.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.width(75.dp),
+                                        textAlign = TextAlign.Center
+                                    )
+                                    val qtyStr = if (itm.quantity % 1.0 == 0.0) itm.quantity.toLong().toString() else itm.quantity.toString()
+                                    Text(
+                                        text = NumberFormatUtils.toPersianDigits(qtyStr),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.width(60.dp),
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Text(
+                                        text = unitDisplay,
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.width(85.dp),
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Text(
+                                        text = NumberFormatUtils.formatPriceOnlyNumber(itm.unitPrice),
+                                        fontSize = 10.sp,
+                                        modifier = Modifier.width(95.dp),
+                                        textAlign = TextAlign.End
+                                    )
+                                    Text(
+                                        text = NumberFormatUtils.formatPriceOnlyNumber(itm.totalPrice),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.5.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.width(108.dp),
+                                        textAlign = TextAlign.End
+                                    )
+                                }
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(10.dp))

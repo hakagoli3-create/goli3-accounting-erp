@@ -17,6 +17,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
@@ -27,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CurrencyExchange
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddBox
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -425,6 +429,7 @@ fun InvoiceScreen(
         OfficialInvoiceDetailsDialog(
             invoiceWithItems = invoiceWithItems,
             storeProfile = storeProfile,
+            products = products,
             onDismiss = { viewModel.closeInvoiceDetails() },
             onExportPdf = { viewModel.exportPdf(context, invoiceWithItems, storeProfile) },
             onExportCsv = { viewModel.exportCsv(context, invoiceWithItems, storeProfile) },
@@ -439,6 +444,7 @@ fun InvoiceScreen(
         OfficialInvoicePrintPreviewDialog(
             invoiceWithItems = invWithItems,
             storeProfile = storeProfile,
+            products = products,
             onDismiss = { showOfficialPrintPreview = null },
             onSwitchToThermalReceipt = {
                 showOfficialPrintPreview = null
@@ -2128,16 +2134,43 @@ private fun InvoiceEditorContent(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
+                    val filteredProducts = remember(products, productSearchQuery) {
+                        if (productSearchQuery.isBlank()) products
+                        else products.filter {
+                            it.name.contains(productSearchQuery, ignoreCase = true) ||
+                            it.code.contains(productSearchQuery, ignoreCase = true) ||
+                            it.barcode.contains(productSearchQuery, ignoreCase = true) ||
+                            it.category.contains(productSearchQuery, ignoreCase = true)
+                        }
+                    }
+
                     ExposedDropdownMenuBox(
                         expanded = productMenuExpanded,
-                        onExpandedChange = { productMenuExpanded = !productMenuExpanded }
+                        onExpandedChange = { productMenuExpanded = it }
                     ) {
                         OutlinedTextField(
-                            value = selectedProductToAdd?.name ?: "انتخاب کالا از انبار...",
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("کالا") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = productMenuExpanded) },
+                            value = productSearchQuery,
+                            onValueChange = {
+                                productSearchQuery = it
+                                productMenuExpanded = true
+                            },
+                            label = { Text("جست‌وجو و انتخاب هوشمند کالا (نام، کد کالا یا بارکد)") },
+                            placeholder = { Text("نام، کد کالا یا بارکد را تایپ کنید...") },
+                            trailingIcon = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (productSearchQuery.isNotBlank()) {
+                                        IconButton(onClick = {
+                                            productSearchQuery = ""
+                                            selectedProductToAdd = null
+                                        }) {
+                                            Icon(Icons.Default.Clear, contentDescription = "پاک کردن", modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = productMenuExpanded)
+                                }
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .menuAnchor()
@@ -2145,18 +2178,52 @@ private fun InvoiceEditorContent(
                         )
                         ExposedDropdownMenu(
                             expanded = productMenuExpanded,
-                            onDismissRequest = { productMenuExpanded = false }
+                            onDismissRequest = { productMenuExpanded = false },
+                            modifier = Modifier.heightIn(max = 280.dp)
                         ) {
-                            products.forEach { prod ->
-                                val priceToShow = if (isPurchase) prod.buyPrice else if (pricingMode == "WHOLESALE") prod.wholesalePrice else prod.retailPrice
-                                val priceLabel = if (isPurchase) "فی خرید" else "فی"
+                            if (filteredProducts.isEmpty()) {
                                 DropdownMenuItem(
-                                    text = { Text("${prod.name} | موجودی: ${prod.formatStockDisplay()} | $priceLabel: ${NumberFormatUtils.formatPrice(priceToShow)}") },
-                                    onClick = {
-                                        selectedProductToAdd = prod
-                                        productMenuExpanded = false
-                                    }
+                                    text = { Text("کالایی با این نام، کد یا بارکد یافت نشد", color = Color.Gray, fontSize = 12.sp) },
+                                    onClick = {}
                                 )
+                            } else {
+                                filteredProducts.forEach { prod ->
+                                    val priceToShow = if (isPurchase) prod.buyPrice else if (pricingMode == "WHOLESALE") prod.wholesalePrice else prod.retailPrice
+                                    val priceLabel = if (isPurchase) "فی خرید" else "فی"
+                                    DropdownMenuItem(
+                                        text = {
+                                            Column(modifier = Modifier.fillMaxWidth()) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(prod.name, fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
+                                                    Surface(
+                                                        shape = RoundedCornerShape(4.dp),
+                                                        color = Color(0xFFECEFF1)
+                                                    ) {
+                                                        val displayCode = prod.code.ifBlank { "PRD-${prod.id}" }
+                                                        Text("کد: ${NumberFormatUtils.toPersianDigits(displayCode)}", fontSize = 9.5.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                                    }
+                                                }
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text("موجودی انبار: ${prod.formatStockDisplay()}", fontSize = 10.5.sp, color = Color.Gray)
+                                                    Text("$priceLabel: ${NumberFormatUtils.formatPrice(priceToShow)}", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            selectedProductToAdd = prod
+                                            productSearchQuery = prod.name
+                                            productMenuExpanded = false
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -2169,8 +2236,8 @@ private fun InvoiceEditorContent(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "واحد سنجش: ${if (usePrimaryUnit) prod.primaryUnit else prod.secondaryUnit}",
-                                style = MaterialTheme.typography.bodyMedium
+                                text = "واحد سنجش انتخابی: ${if (usePrimaryUnit) prod.primaryUnit else prod.secondaryUnit}",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
                             )
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(prod.secondaryUnit, fontSize = 12.sp)
@@ -2201,6 +2268,7 @@ private fun InvoiceEditorContent(
                             onClick = {
                                 onAddToCart(prod, usePrimaryUnit)
                                 selectedProductToAdd = null
+                                productSearchQuery = ""
                             },
                             modifier = Modifier.fillMaxWidth().testTag("add_item_to_cart_btn"),
                             shape = RoundedCornerShape(12.dp)
@@ -2214,87 +2282,295 @@ private fun InvoiceEditorContent(
             }
         }
 
-        // Cart items list
+        // Cart items table (جدول استاندارد، خط‌کشی‌شده و راست‌چین اقلام فاکتور)
         if (cartItems.isNotEmpty()) {
             item {
-                Text(
-                    text = "اقلام $docTypeName (${cartItems.size} ردیف):",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "جدول رسمی اقلام $docTypeName (${NumberFormatUtils.toPersianDigits(cartItems.size.toString())} قلم):",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold, color = NavyPrimary)
+                    )
+                    Text(
+                        text = "مجموع مقادیر: ${NumberFormatUtils.toPersianDigits(cartItems.sumOf { it.quantity }.toString())} واحد",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
 
-            items(cartItems.indices.toList()) { index ->
-                val item = cartItems[index]
+            item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
-                    Row(
+                    val tableScrollState = rememberScrollState()
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .horizontalScroll(tableScrollState)
+                            .widthIn(min = 786.dp)
+                            .padding(8.dp)
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = item.product.name, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "واحد: ${item.unitName}",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "(تغییر به ${if (item.isPrimaryUnit) item.product.secondaryUnit else item.product.primaryUnit})",
-                                    fontSize = 10.sp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.clickable { onToggleUnit(index) }
-                                )
-                            }
-                            Text(
-                                text = "فی: ${NumberFormatUtils.formatPrice(item.unitPrice)} | کل: ${NumberFormatUtils.formatPrice(item.totalPrice)}",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                        // سرفصل ستون‌های جدول رسمی
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFF263238), RoundedCornerShape(8.dp))
+                                .padding(vertical = 9.dp, horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("ردیف", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color.White, modifier = Modifier.width(36.dp), textAlign = TextAlign.Center)
+                            Text("نام کالا یا خدمات", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color.White, modifier = Modifier.width(175.dp))
+                            Text("کد کالا", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color.White, modifier = Modifier.width(80.dp), textAlign = TextAlign.Center)
+                            Text("تعداد (ویرایش)", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color.White, modifier = Modifier.width(105.dp), textAlign = TextAlign.Center)
+                            Text("واحد (در کارتن)", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color.White, modifier = Modifier.width(95.dp), textAlign = TextAlign.Center)
+                            Text("فی (تومان)", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color.White, modifier = Modifier.width(110.dp), textAlign = TextAlign.End)
+                            Text("مبلغ کل (تومان)", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color.White, modifier = Modifier.width(115.dp), textAlign = TextAlign.End)
+                            Text("عملیات", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color.White, modifier = Modifier.width(70.dp), textAlign = TextAlign.Center)
                         }
 
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = { onUpdateQuantity(index, item.quantity - 1.0) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "کاهش", tint = Color.Gray)
+                        cartItems.forEachIndexed { index, item ->
+                            val rowBg = if (index % 2 == 0) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
+                            val realProductCode = item.product.code.ifBlank { "PRD-${item.product.id}" }
+                            val conversionRate = item.product.conversionRate
+                            val rateStr = if (conversionRate % 1.0 == 0.0) conversionRate.toInt().toString() else conversionRate.toString()
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(rowBg)
+                                    .padding(vertical = 7.dp, horizontal = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // ۱. ردیف
+                                Text(
+                                    text = NumberFormatUtils.toPersianDigits((index + 1).toString()),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.width(36.dp),
+                                    textAlign = TextAlign.Center
+                                )
+                                // ۲. نام کالا یا خدمات
+                                Column(modifier = Modifier.width(175.dp)) {
+                                    Text(
+                                        text = item.product.name,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.5.sp,
+                                        maxLines = 2
+                                    )
+                                    if (item.product.barcode.isNotBlank()) {
+                                        Text(
+                                            text = "بارکد: ${item.product.barcode}",
+                                            fontSize = 9.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                // ۳. کد کالا (اطلاعات واقعی محصول)
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color(0xFFECEFF1),
+                                    modifier = Modifier.width(80.dp)
+                                ) {
+                                    Text(
+                                        text = NumberFormatUtils.toPersianDigits(realProductCode),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(vertical = 2.dp)
+                                    )
+                                }
+                                // ۴. تعداد با دکمه‌های شکیل کاهش و افزایش و قابلیت کلیک روی عدد جهت ویرایش مستقیم
+                                Row(
+                                    modifier = Modifier.width(105.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    IconButton(
+                                        onClick = { onUpdateQuantity(index, item.quantity - 1.0) },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(Icons.Default.Remove, contentDescription = "کاهش", tint = Color.Gray, modifier = Modifier.size(14.dp))
+                                    }
+                                    val qtyStr = if (item.quantity % 1.0 == 0.0) item.quantity.toLong().toString() else item.quantity.toString()
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                        modifier = Modifier
+                                            .padding(horizontal = 2.dp)
+                                            .clickable { editingCartItemIndex = index }
+                                    ) {
+                                        Text(
+                                            text = NumberFormatUtils.toPersianDigits(qtyStr),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = NavyPrimary,
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { onUpdateQuantity(index, item.quantity + 1.0) },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(Icons.Default.Add, contentDescription = "افزایش", tint = NavyPrimary, modifier = Modifier.size(14.dp))
+                                    }
+                                }
+                                // ۵. واحد با نمایش صریح تعداد در کارتن و سوییچ واحد
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                                    modifier = Modifier
+                                        .width(95.dp)
+                                        .clickable { onToggleUnit(index) }
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(vertical = 3.dp, horizontal = 4.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text(
+                                            text = item.unitName,
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            textAlign = TextAlign.Center
+                                        )
+                                        if (conversionRate > 1.0) {
+                                            val subText = if (item.isPrimaryUnit) "(${NumberFormatUtils.toPersianDigits(rateStr)} تایی)" else "(کارتن: ${NumberFormatUtils.toPersianDigits(rateStr)})"
+                                            Text(
+                                                text = subText,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                                                textAlign = TextAlign.Center
+                                            )
+                                        }
+                                    }
+                                }
+                                // ۶. بهای واحد (فی) با قابلیت کلیک مستقیم جهت ویرایش و تغییر
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    border = BorderStroke(0.8.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
+                                    modifier = Modifier
+                                        .width(110.dp)
+                                        .clickable { editingCartItemIndex = index }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Edit,
+                                            contentDescription = "ویرایش فی",
+                                            tint = NavyPrimary,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                        Text(
+                                            text = NumberFormatUtils.formatPriceOnlyNumber(item.unitPrice),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = NavyPrimary,
+                                            textAlign = TextAlign.End
+                                        )
+                                    }
+                                }
+                                // ۷. مبلغ کل ردیف
+                                Text(
+                                    text = NumberFormatUtils.formatPriceOnlyNumber(item.totalPrice),
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 11.5.sp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.width(115.dp),
+                                    textAlign = TextAlign.End
+                                )
+                                // ۸. عملیات (ویرایش و حذف ردیف)
+                                Row(
+                                    modifier = Modifier.width(70.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    IconButton(
+                                        onClick = { editingCartItemIndex = index },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(Icons.Default.Edit, contentDescription = "ویرایش قلم", tint = NavyPrimary, modifier = Modifier.size(16.dp))
+                                    }
+                                    IconButton(
+                                        onClick = { onRemoveCartItem(index) },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(Icons.Default.Delete, contentDescription = "حذف قلم", tint = AccountingCreditRed, modifier = Modifier.size(16.dp))
+                                    }
+                                }
                             }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
+                        }
+
+                        // ردیف فوتر جدول اقلام: جمع کل مقادیر و مبالغ
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFFECEFF1), RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp))
+                                .padding(vertical = 8.dp, horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("جمع کل اقلام:", fontWeight = FontWeight.Bold, fontSize = 11.5.sp, modifier = Modifier.width(291.dp))
+                            val totalQty = cartItems.sumOf { it.quantity }
+                            val totalQtyStr = if (totalQty % 1.0 == 0.0) totalQty.toLong().toString() else totalQty.toString()
                             Text(
-                                text = NumberFormatUtils.toPersianDigits(item.quantity.toString()),
+                                text = "${NumberFormatUtils.toPersianDigits(totalQtyStr)} قلم",
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
+                                fontSize = 11.sp,
+                                modifier = Modifier.width(105.dp),
+                                textAlign = TextAlign.Center
                             )
-                            IconButton(onClick = { onUpdateQuantity(index, item.quantity + 1.0) }) {
-                                Icon(Icons.Default.Add, contentDescription = "افزایش", tint = MaterialTheme.colorScheme.primary)
-                            }
+                            Spacer(modifier = Modifier.width(95.dp + 110.dp))
+                            Text(
+                                text = NumberFormatUtils.formatPriceOnlyNumber(subtotal),
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 12.sp,
+                                color = NavyPrimary,
+                                modifier = Modifier.width(115.dp),
+                                textAlign = TextAlign.End
+                            )
+                            Spacer(modifier = Modifier.width(70.dp))
                         }
                     }
                 }
             }
 
-            // Summary & Checkout Button
+            // خلاصه محاسبات مالی پایانی و تسویه (Financial Summary & Settlement)
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    colors = CardDefaults.cardColors(containerColor = CleanSurface),
+                    border = BorderStroke(1.dp, CleanBorder),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "خلاصه محاسبات مالی و تسویه فاکتور:",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold, color = NavyPrimary)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+
                         OutlinedTextField(
                             value = discountText,
                             onValueChange = {
                                 discountText = it
-                                onDiscountChange(it.toLongOrNull() ?: 0L)
+                                onDiscountChange(NumberFormatUtils.parseLongSafe(it, 0L))
                             },
-                            label = { Text("تخفیف کل (تومان)") },
+                            label = { Text("تخفیف کل فاکتور (تومان)") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(10.dp)
@@ -2302,70 +2578,127 @@ private fun InvoiceEditorContent(
 
                         Spacer(modifier = Modifier.height(10.dp))
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(CleanBackground, RoundedCornerShape(10.dp))
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("محاسبه مالیات بر ارزش افزوده (۱۰٪):")
+                            Column {
+                                Text("محاسبه مالیات بر ارزش افزوده (۱۰٪)", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                Text("طبق قوانین پایانه فروشگاهی و سامانه مودیان", fontSize = 10.sp, color = TextDarkMuted)
+                            }
                             Switch(checked = applyTax, onCheckedChange = onToggleTax)
                         }
 
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = CleanBorder)
 
-                        // ریز محاسبات مالی شفاف
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("جمع اقلام:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(NumberFormatUtils.formatPrice(subtotal), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                        if (discount > 0) {
-                            Spacer(modifier = Modifier.height(4.dp))
+                        // جدول ریز محاسبات مالی
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("تخفیف:", fontSize = 12.sp, color = AccountingCreditRed)
-                                Text("- " + NumberFormatUtils.formatPrice(discount), fontSize = 12.sp, color = AccountingCreditRed, fontWeight = FontWeight.SemiBold)
+                                Text("جمع ناخالص اقلام:", fontSize = 12.5.sp, color = TextDarkSecondary)
+                                Text(NumberFormatUtils.formatPrice(subtotal), fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                            }
+                            if (discount > 0) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("تخفیف فاکتور:", fontSize = 12.5.sp, color = AccountingCreditRed)
+                                    Text("- " + NumberFormatUtils.formatPrice(discount), fontSize = 12.5.sp, color = AccountingCreditRed, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            if (applyTax) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("مالیات بر ارزش افزوده (۱۰٪):", fontSize = 12.5.sp, color = TextDarkSecondary)
+                                    Text("+ " + NumberFormatUtils.formatPrice(tax), fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            if (directExpenseAmount > 0) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("هزینه مستقیم ($directExpenseType):", fontSize = 12.5.sp, color = TextDarkSecondary)
+                                    Text("+ " + NumberFormatUtils.formatPrice(directExpenseAmount), fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
-                        if (applyTax) {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("مالیات بر ارزش افزوده (۱۰٪):", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text("+ " + NumberFormatUtils.formatPrice(tax), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-                        if (directExpenseAmount > 0) {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("هزینه مستقیم ($directExpenseType):", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text("+ " + NumberFormatUtils.formatPrice(directExpenseAmount), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        HorizontalDivider()
-                        Spacer(modifier = Modifier.height(8.dp))
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = CleanBorder)
+
+                        // مبلغ نهایی برجسته به تومان و به حروف
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = NavyPrimary.copy(alpha = 0.08f),
+                            border = BorderStroke(1.dp, NavyPrimary.copy(alpha = 0.2f)),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("مبلغ کل قابل پرداخت ($docTypeName):", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text(
-                                text = NumberFormatUtils.formatPrice(grandTotal),
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 17.sp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("مبلغ کل قابل پرداخت ($docTypeName):", fontWeight = FontWeight.ExtraBold, fontSize = 13.5.sp, color = NavyPrimary)
+                                    Text(
+                                        text = NumberFormatUtils.formatPrice(grandTotal),
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 18.sp,
+                                        color = NavyPrimary
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "به حروف: " + NumberFormatUtils.numberToPersianWords(grandTotal) + " تومان",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextDarkSecondary
+                                )
+                            }
+                        }
+
+                        // اطلاعات حساب طرف‌حساب و وضعیت تسویه
+                        Spacer(modifier = Modifier.height(12.dp))
+                        val currentBal = selectedParty?.currentBalance ?: 0L
+                        val isPartyCustomer = !isPurchase
+                        val projectedBal = if (isPartyCustomer) currentBal + grandTotal else currentBal - grandTotal
+
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = CleanBackground),
+                            border = BorderStroke(1.dp, CleanBorder)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("وضعیت حساب طرف‌حساب و شیوه تسویه:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = NavyPrimary)
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("طرف‌حساب انتخابی:", fontSize = 11.5.sp, color = TextDarkSecondary)
+                                    Text(selectedParty?.name ?: "مشتری نقدی (عمومی)", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                }
+                                if (selectedParty != null) {
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("مانده حساب قبلی:", fontSize = 11.5.sp, color = TextDarkSecondary)
+                                        val statusText = if (currentBal > 0) "بدهکار" else if (currentBal < 0) "بستانکار" else "بی‌حساب"
+                                        Text("${NumberFormatUtils.formatPrice(Math.abs(currentBal))} ($statusText)", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("مانده پیش‌بینی‌شده پس از فاکتور:", fontSize = 11.5.sp, color = TextDarkSecondary)
+                                        val projStatus = if (projectedBal > 0) "بدهکار" else if (projectedBal < 0) "بستانکار" else "بی‌حساب"
+                                        Text("${NumberFormatUtils.formatPrice(Math.abs(projectedBal))} ($projStatus)", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = NavyPrimary)
+                                    }
+                                }
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(14.dp))
                         Button(
                             onClick = onOpenSettlement,
-                            modifier = Modifier.fillMaxWidth().testTag("open_settlement_btn"),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("open_settlement_btn"),
                             shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                            colors = ButtonDefaults.buttonColors(containerColor = NavyPrimary, contentColor = Color.White)
                         ) {
-                            Icon(imageVector = Icons.Default.Payments, contentDescription = null)
+                            Icon(imageVector = Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("انتخاب نوع تسویه و ثبت نهایی $docTypeName")
+                            Text("انتخاب نوع تسویه و ثبت نهایی $docTypeName", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
                     }
                 }
@@ -2406,4 +2739,315 @@ private fun InvoiceEditorContent(
             }
         )
     }
+
+    // دیالوگ ویرایش مستقیم تعداد و فی برای قلم انتخاب‌شده
+    editingCartItemIndex?.let { index ->
+        cartItems.getOrNull(index)?.let { item ->
+            EditCartItemDialog(
+                cartItem = item,
+                pricingMode = pricingMode,
+                isPurchase = isPurchase,
+                onDismiss = { editingCartItemIndex = null },
+                onConfirm = { newQty, newPrice, isPrimary ->
+                    onUpdateCartItemFull(index, newQty, newPrice, isPrimary)
+                    editingCartItemIndex = null
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun EditCartItemDialog(
+    cartItem: CartItem,
+    pricingMode: String,
+    isPurchase: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (Double, Long, Boolean) -> Unit
+) {
+    var quantityText by remember {
+        mutableStateOf(if (cartItem.quantity % 1.0 == 0.0) cartItem.quantity.toLong().toString() else cartItem.quantity.toString())
+    }
+    var unitPriceText by remember {
+        mutableStateOf(cartItem.unitPrice.toString())
+    }
+    var isPrimaryUnit by remember {
+        mutableStateOf(cartItem.isPrimaryUnit)
+    }
+
+    val prod = cartItem.product
+    val conversionRate = prod.conversionRate
+    val rateStr = if (conversionRate % 1.0 == 0.0) conversionRate.toInt().toString() else conversionRate.toString()
+
+    val currentQty = NumberFormatUtils.parseDoubleSafe(quantityText, 1.0)
+    val currentPrice = NumberFormatUtils.parseLongSafe(unitPriceText, 0L)
+    val rowTotal = (currentQty * currentPrice).toLong()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text(
+                    text = "ویرایش قلم فاکتور",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = NavyPrimary
+                )
+                Text(
+                    text = prod.name,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                val codeDisplay = prod.code.ifBlank { "PRD-${prod.id}" }
+                Text(
+                    text = "کد کالا: ${NumberFormatUtils.toPersianDigits(codeDisplay)}",
+                    fontSize = 10.5.sp,
+                    color = Color.Gray
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // نمایش تعداد در کارتن و تغییر واحد
+                if (conversionRate > 1.0) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "بسته‌بندی: هر ${prod.primaryUnit} = ${NumberFormatUtils.toPersianDigits(rateStr)} ${prod.secondaryUnit}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = NavyPrimary
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("واحد انتخابی:", fontSize = 11.sp)
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    FilterChip(
+                                        selected = isPrimaryUnit,
+                                        onClick = {
+                                            if (!isPrimaryUnit) {
+                                                isPrimaryUnit = true
+                                                val defaultCartonPrice = if (isPurchase) {
+                                                    (prod.buyPrice * prod.conversionRate).toLong()
+                                                } else if (pricingMode == "WHOLESALE") {
+                                                    (prod.wholesalePrice * prod.conversionRate).toLong()
+                                                } else {
+                                                    (prod.retailPrice * prod.conversionRate).toLong()
+                                                }
+                                                unitPriceText = defaultCartonPrice.toString()
+                                            }
+                                        },
+                                        label = { Text("${prod.primaryUnit} (${NumberFormatUtils.toPersianDigits(rateStr)} تایی)", fontSize = 10.5.sp) }
+                                    )
+                                    FilterChip(
+                                        selected = !isPrimaryUnit,
+                                        onClick = {
+                                            if (isPrimaryUnit) {
+                                                isPrimaryUnit = false
+                                                val defaultSecondaryPrice = if (isPurchase) {
+                                                    prod.buyPrice
+                                                } else if (pricingMode == "WHOLESALE") {
+                                                    prod.wholesalePrice
+                                                } else {
+                                                    prod.retailPrice
+                                                }
+                                                unitPriceText = defaultSecondaryPrice.toString()
+                                            }
+                                        },
+                                        label = { Text(prod.secondaryUnit, fontSize = 10.5.sp) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ویرایش تعداد (Quantity)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "تعداد (${if (isPrimaryUnit) prod.primaryUnit else prod.secondaryUnit}):",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        color = NavyPrimary
+                    )
+                    OutlinedTextField(
+                        value = quantityText,
+                        onValueChange = { quantityText = it },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        trailingIcon = {
+                            Text(
+                                text = if (isPrimaryUnit) prod.primaryUnit else prod.secondaryUnit,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(end = 8.dp),
+                                color = Color.Gray
+                            )
+                        }
+                    )
+                    // دکمه‌های سریع تغییر تعداد
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        listOf(-10.0, -1.0, 1.0, 5.0, 10.0).forEach { delta ->
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable {
+                                        val q = (NumberFormatUtils.parseDoubleSafe(quantityText, 1.0) + delta).coerceAtLeast(0.1)
+                                        quantityText = if (q % 1.0 == 0.0) q.toLong().toString() else q.toString()
+                                    }
+                            ) {
+                                Text(
+                                    text = if (delta > 0) "+${delta.toInt()}" else "${delta.toInt()}",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // ویرایش فی (Unit Price)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "بهای واحد / فی (تومان):",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = NavyPrimary
+                        )
+                        if (currentPrice > 0L) {
+                            Text(
+                                text = "${NumberFormatUtils.formatPrice(currentPrice)}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = unitPriceText,
+                        onValueChange = { unitPriceText = it },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("مبلغ به تومان") }
+                    )
+                    // نرخ‌های پیش‌فرض محصول
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        val factor = if (isPrimaryUnit) prod.conversionRate else 1.0
+                        if (isPurchase) {
+                            val pBuy = (prod.buyPrice * factor).toLong()
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { unitPriceText = pBuy.toString() }
+                            ) {
+                                Text("خرید پایه (${NumberFormatUtils.formatPriceOnlyNumber(pBuy)})", fontSize = 10.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 4.dp))
+                            }
+                        } else {
+                            val pRetail = (prod.retailPrice * factor).toLong()
+                            val pWholesale = (prod.wholesalePrice * factor).toLong()
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { unitPriceText = pRetail.toString() }
+                            ) {
+                                Text("تک‌فروشی (${NumberFormatUtils.formatPriceOnlyNumber(pRetail)})", fontSize = 10.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 4.dp))
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { unitPriceText = pWholesale.toString() }
+                            ) {
+                                Text("عمده (${NumberFormatUtils.formatPriceOnlyNumber(pWholesale)})", fontSize = 10.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 4.dp))
+                            }
+                        }
+                    }
+                }
+
+                // کارت محاسبه لحظه‌ای مبلغ کل ردیف
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = CardDefaults.cardColors(containerColor = CleanBackground),
+                    border = BorderStroke(1.dp, CleanBorder)
+                ) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("مبلغ کل این ردیف:", fontSize = 11.5.sp, color = TextDarkSecondary)
+                            Text(
+                                text = NumberFormatUtils.formatPrice(rowTotal),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = NavyPrimary
+                            )
+                        }
+                        if (rowTotal > 0L) {
+                            Text(
+                                text = "${NumberFormatUtils.numberToPersianWords(rowTotal)} تومان",
+                                fontSize = 10.5.sp,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val finalQty = currentQty.coerceAtLeast(0.01)
+                    val finalPrice = currentPrice.coerceAtLeast(0L)
+                    onConfirm(finalQty, finalPrice, isPrimaryUnit)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = NavyPrimary)
+            ) {
+                Text("اعمال تغییرات", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("انصراف", fontSize = 12.sp)
+            }
+        }
+    )
 }

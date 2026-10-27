@@ -11,6 +11,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import com.example.data.model.InvoiceWithItems
+import com.example.data.model.ProductEntity
 import com.example.data.model.StoreProfile
 import java.io.File
 import java.io.FileOutputStream
@@ -116,7 +117,8 @@ object ExportHelper {
     fun exportInvoicePdf(
         context: Context,
         invoiceWithItems: InvoiceWithItems,
-        storeProfile: StoreProfile
+        storeProfile: StoreProfile,
+        products: List<ProductEntity> = emptyList()
     ): File? {
         return try {
             val invoice = invoiceWithItems.invoice
@@ -207,18 +209,19 @@ object ExportHelper {
 
             // ۳. جدول استاندارد اقلام با خط‌کشی منظم شبکه (Standardized Grid Table)
             // ستون‌ها از راست به چپ:
-            // ردیف (35) [575 -> 540]
-            // شرح کالا یا خدمات (215) [540 -> 325]
-            // تعداد (55) [325 -> 270]
-            // واحد (50) [270 -> 220]
-            // فی تومان (95) [220 -> 125]
-            // مبلغ کل تومان (105) [125 -> 20]
+            // ردیف (30) [575 -> 545]
+            // شرح کالا یا خدمات (190) [545 -> 355]
+            // کد کالا (60) [355 -> 295]
+            // تعداد (50) [295 -> 245]
+            // واحد (45) [245 -> 200]
+            // فی تومان (80) [200 -> 120]
+            // مبلغ کل تومان (100) [120 -> 20]
             val tableStartX = 20f
             val tableEndX = (pageWidth - 20).toFloat() // 575f
             val tableStartY = y
             val headerHeight = 22f
             val rowHeight = 20f
-            val gridCols = floatArrayOf(575f, 540f, 325f, 270f, 220f, 125f, 20f)
+            val gridCols = floatArrayOf(575f, 545f, 365f, 310f, 265f, 195f, 120f, 20f)
 
             // رنگ پس‌زمینه هدر جدول
             paint.style = Paint.Style.FILL
@@ -231,11 +234,12 @@ object ExportHelper {
 
             // متون هدر جدول
             drawTextRtl(canvas, textPaint, "ردیف", 562f, tableStartY + 15f)
-            drawTextRtl(canvas, textPaint, "شرح کالا یا خدمات", 530f, tableStartY + 15f)
-            drawTextRtl(canvas, textPaint, "تعداد", 305f, tableStartY + 15f)
-            drawTextRtl(canvas, textPaint, "واحد", 252f, tableStartY + 15f)
-            drawTextRtl(canvas, textPaint, "فی (تومان)", 210f, tableStartY + 15f)
-            drawTextRtl(canvas, textPaint, "مبلغ کل (تومان)", 115f, tableStartY + 15f)
+            drawTextRtl(canvas, textPaint, "شرح کالا یا خدمات", 535f, tableStartY + 15f)
+            drawTextRtl(canvas, textPaint, "کد کالا", 355f, tableStartY + 15f)
+            drawTextRtl(canvas, textPaint, "تعداد", 298f, tableStartY + 15f)
+            drawTextRtl(canvas, textPaint, "واحد (در کارتن)", 255f, tableStartY + 15f)
+            drawTextRtl(canvas, textPaint, "فی (تومان)", 185f, tableStartY + 15f)
+            drawTextRtl(canvas, textPaint, "مبلغ کل (تومان)", 105f, tableStartY + 15f)
 
             var rowY = tableStartY + headerHeight
             textPaint.color = Color.rgb(20, 24, 30)
@@ -248,19 +252,36 @@ object ExportHelper {
                 paint.color = rowBg
                 canvas.drawRect(tableStartX, rowY, tableEndX, rowY + rowHeight, paint)
 
+                val prod = products.find { it.id == item.productId }
+                val prodCode = prod?.code?.ifBlank { null }
+                    ?: item.barcode.ifBlank { "PRD-${item.productId}" }
+                val conversionRate = prod?.conversionRate ?: 1.0
+                val unitDisplay = if (conversionRate > 1.0) {
+                    val rateInt = if (conversionRate % 1.0 == 0.0) conversionRate.toInt().toString() else conversionRate.toString()
+                    if (item.unitName == prod?.primaryUnit) {
+                        "${item.unitName} (${NumberFormatUtils.toPersianDigits(rateInt)} تایی)"
+                    } else {
+                        "${item.unitName} (${NumberFormatUtils.toPersianDigits(rateInt)})"
+                    }
+                } else {
+                    item.unitName
+                }
+
                 // ردیف
                 drawTextRtl(canvas, textPaint, NumberFormatUtils.toPersianDigits((index + 1).toString()), 562f, rowY + 14f)
                 // نام کالا
-                drawTextRtl(canvas, textPaint, item.productName.take(34), 530f, rowY + 14f)
+                drawTextRtl(canvas, textPaint, item.productName.take(28), 535f, rowY + 14f)
+                // کد کالا
+                drawTextRtl(canvas, textPaint, NumberFormatUtils.toPersianDigits(prodCode).take(12), 355f, rowY + 14f)
                 // تعداد
                 val qtyStr = if (item.quantity % 1.0 == 0.0) item.quantity.toLong().toString() else item.quantity.toString()
-                drawTextRtl(canvas, textPaint, NumberFormatUtils.toPersianDigits(qtyStr), 305f, rowY + 14f)
+                drawTextRtl(canvas, textPaint, NumberFormatUtils.toPersianDigits(qtyStr), 298f, rowY + 14f)
                 // واحد
-                drawTextRtl(canvas, textPaint, item.unitName, 252f, rowY + 14f)
+                drawTextRtl(canvas, textPaint, unitDisplay, 255f, rowY + 14f)
                 // فی
-                drawTextRtl(canvas, textPaint, NumberFormatUtils.formatPriceOnlyNumber(item.unitPrice), 210f, rowY + 14f)
+                drawTextRtl(canvas, textPaint, NumberFormatUtils.formatPriceOnlyNumber(item.unitPrice), 185f, rowY + 14f)
                 // مبلغ کل
-                drawTextRtl(canvas, textPaint, NumberFormatUtils.formatPriceOnlyNumber(item.totalPrice), 115f, rowY + 14f)
+                drawTextRtl(canvas, textPaint, NumberFormatUtils.formatPriceOnlyNumber(item.totalPrice), 105f, rowY + 14f)
 
                 rowY += rowHeight
             }

@@ -991,7 +991,7 @@ class InvoiceViewModel(
     }
 
     fun exportPdf(context: Context, invoiceWithItems: InvoiceWithItems, storeProfile: StoreProfile) {
-        val file = ExportHelper.exportInvoicePdf(context, invoiceWithItems, storeProfile)
+        val file = ExportHelper.exportInvoicePdf(context, invoiceWithItems, storeProfile, allProducts.value)
         if (file != null) {
             ExportHelper.shareFile(context, file, "application/pdf", "اشتراک‌گذاری فاکتور PDF")
         }
