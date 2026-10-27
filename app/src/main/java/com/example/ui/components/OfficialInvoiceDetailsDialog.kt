@@ -178,6 +178,10 @@ fun OfficialInvoiceDetailsDialog(
 
                 // Seller & Buyer Box
                 val isPurchaseDetails = inv.invoiceType in listOf("PURCHASE", "RETURN_PURCHASE")
+                val storeName = storeProfile.name.ifBlank { "بازرگانی گلی" }
+                val storeAddress = storeProfile.address.ifBlank { "منطقه آزاد انزلی، مجتمع تجاری ستاره شمال، غرفه ۵۴" }
+                val storePhone = storeProfile.phone.ifBlank { "۰۱۳-۴۴۴۲۰۰۰۰" }
+
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
@@ -191,16 +195,16 @@ fun OfficialInvoiceDetailsDialog(
                             }
                             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("خریدار: ${storeProfile.name}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                Text("تلفن: ${storeProfile.phone}", fontSize = 12.sp)
+                                Text("خریدار: $storeName", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text("تلفن: $storePhone", fontSize = 12.sp)
                             }
-                            Text("آدرس: ${storeProfile.address}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("آدرس: $storeAddress", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         } else {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("فروشنده: ${storeProfile.name}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                Text("تلفن: ${storeProfile.phone}", fontSize = 12.sp)
+                                Text("فروشنده: $storeName", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text("تلفن: $storePhone", fontSize = 12.sp)
                             }
-                            Text("آدرس: ${storeProfile.address}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("آدرس: $storeAddress", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                             val buyerTitle = if (inv.invoiceType == "RETURN_SALE") "مرجوع‌کننده / خریدار" else "خریدار"
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -213,30 +217,32 @@ fun OfficialInvoiceDetailsDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Table of items
+                // Table of items (جدول رسمی اقلام فاکتور)
                 Text("اقلام فاکتور (${items.size} ردیف):", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                 ) {
                     Column(modifier = Modifier.padding(8.dp)) {
-                        // Header Row
+                        // Header Row with official commercial columns
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(Color(0xFF37474F), RoundedCornerShape(6.dp))
-                                .padding(vertical = 6.dp, horizontal = 6.dp),
+                                .padding(vertical = 8.dp, horizontal = 6.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("ردیف", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.width(28.dp))
-                            Text("شرح کالا", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(2f))
-                            Text("تعداد", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(0.9f))
-                            Text("فی (تومان)", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(1.2f))
-                            Text("جمع کل (تومان)", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(1.3f))
+                            Text("نام کالا یا خدمات", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(2f))
+                            Text("تعداد", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(0.7f))
+                            Text("واحد", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(0.7f))
+                            Text("فی (تومان)", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(1.1f))
+                            Text("مبلغ کل (تومان)", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(1.2f))
                         }
 
                         items.forEachIndexed { idx, itm ->
@@ -245,15 +251,17 @@ fun OfficialInvoiceDetailsDialog(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .background(rowBg)
-                                    .padding(vertical = 6.dp, horizontal = 6.dp),
+                                    .padding(vertical = 7.dp, horizontal = 6.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(NumberFormatUtils.toPersianDigits((idx + 1).toString()), fontSize = 10.sp, modifier = Modifier.width(28.dp))
                                 Text(itm.productName, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, modifier = Modifier.weight(2f))
-                                Text("${NumberFormatUtils.toPersianDigits(itm.quantity.toString())} ${itm.unitName}", fontSize = 10.sp, modifier = Modifier.weight(0.9f))
-                                Text(NumberFormatUtils.formatPrice(itm.unitPrice), fontSize = 10.sp, modifier = Modifier.weight(1.2f))
-                                Text(NumberFormatUtils.formatPrice(itm.totalPrice), fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(1.3f))
+                                val qtyStr = if (itm.quantity % 1.0 == 0.0) itm.quantity.toLong().toString() else itm.quantity.toString()
+                                Text(NumberFormatUtils.toPersianDigits(qtyStr), fontSize = 10.sp, modifier = Modifier.weight(0.7f))
+                                Text(itm.unitName, fontSize = 10.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(0.7f))
+                                Text(NumberFormatUtils.formatPriceOnlyNumber(itm.unitPrice), fontSize = 10.sp, modifier = Modifier.weight(1.1f))
+                                Text(NumberFormatUtils.formatPriceOnlyNumber(itm.totalPrice), fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(1.2f))
                             }
                             if (idx < items.size - 1) {
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
@@ -374,6 +382,59 @@ fun OfficialInvoiceDetailsDialog(
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+
+                        val accountStatus = if (inv.paymentType == "CREDIT") {
+                            "وضعیت حساب: مانده بدهکار طرف‌حساب (فروش نسیه)"
+                        } else {
+                            "وضعیت حساب: تسویه کامل فاکتور و بدون مانده بدهی"
+                        }
+                        Text(
+                            text = accountStatus,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (inv.paymentType == "CREDIT") AccountingCreditRed else AccountingDebitGreen,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // کادرهای مهر و امضای فروشنده و خریدار
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Card(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp).fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("مهر و امضای فروشنده", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Text(storeName, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(modifier = Modifier.height(35.dp))
+                        }
+                    }
+
+                    Card(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp).fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("امضا و تایید خریدار", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Text(inv.partyName, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(modifier = Modifier.height(35.dp))
+                        }
                     }
                 }
             }

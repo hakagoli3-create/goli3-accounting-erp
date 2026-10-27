@@ -132,6 +132,7 @@ import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.ui.draw.clip
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.ui.text.style.TextAlign
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1539,6 +1540,7 @@ private fun InvoiceEditorContent(
     var partyMenuExpanded by remember { mutableStateOf(false) }
     var productMenuExpanded by remember { mutableStateOf(false) }
     var selectedProductToAdd by remember { mutableStateOf<ProductEntity?>(null) }
+    var productSearchQuery by remember { mutableStateOf("") }
     var showQuickAddPartyDialog by remember { mutableStateOf(false) }
     var showQuickAddProductDialog by remember { mutableStateOf(false) }
     var showCameraScanner by remember { mutableStateOf(false) }

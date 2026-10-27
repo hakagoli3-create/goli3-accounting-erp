@@ -423,20 +423,21 @@ fun OfficialInvoicePrintPreviewDialog(
 
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        // Items Table Header
+                        // Items Table Header with official commercial columns
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(Color(0xFF37474F), RoundedCornerShape(6.dp))
-                                .padding(vertical = 6.dp, horizontal = 6.dp),
+                                .padding(vertical = 7.dp, horizontal = 6.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("ردیف", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.width(30.dp), textAlign = TextAlign.Center)
-                            Text("شرح کالا / خدمات", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(2.2f))
-                            Text("تعداد", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(0.9f), textAlign = TextAlign.Center)
-                            Text("فی (تومان)", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(1.3f), textAlign = TextAlign.End)
-                            Text("مبلغ کل", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(1.5f), textAlign = TextAlign.End)
+                            Text("ردیف", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.width(28.dp), textAlign = TextAlign.Center)
+                            Text("نام کالا یا خدمات", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(2.1f))
+                            Text("تعداد", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(0.7f), textAlign = TextAlign.Center)
+                            Text("واحد", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(0.7f), textAlign = TextAlign.Center)
+                            Text("فی (تومان)", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(1.1f), textAlign = TextAlign.End)
+                            Text("مبلغ کل (تومان)", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(1.3f), textAlign = TextAlign.End)
                         }
 
                         // Items Rows
@@ -453,32 +454,40 @@ fun OfficialInvoicePrintPreviewDialog(
                                 Text(
                                     text = NumberFormatUtils.toPersianDigits((idx + 1).toString()),
                                     fontSize = 10.sp,
-                                    modifier = Modifier.width(30.dp),
+                                    modifier = Modifier.width(28.dp),
                                     textAlign = TextAlign.Center
                                 )
-                                Column(modifier = Modifier.weight(2.2f)) {
+                                Column(modifier = Modifier.weight(2.1f)) {
                                     Text(itm.productName, fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
                                     if (itm.barcode.isNotBlank()) {
                                         Text("بارکد: ${itm.barcode}", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 }
+                                val qtyStr = if (itm.quantity % 1.0 == 0.0) itm.quantity.toLong().toString() else itm.quantity.toString()
                                 Text(
-                                    text = "${NumberFormatUtils.toPersianDigits(itm.quantity.toString())} ${itm.unitName}",
+                                    text = NumberFormatUtils.toPersianDigits(qtyStr),
                                     fontSize = 10.sp,
-                                    modifier = Modifier.weight(0.9f),
+                                    modifier = Modifier.weight(0.7f),
                                     textAlign = TextAlign.Center
                                 )
                                 Text(
-                                    text = NumberFormatUtils.formatPrice(itm.unitPrice),
+                                    text = itm.unitName,
                                     fontSize = 10.sp,
-                                    modifier = Modifier.weight(1.3f),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.weight(0.7f),
+                                    textAlign = TextAlign.Center
+                                )
+                                Text(
+                                    text = NumberFormatUtils.formatPriceOnlyNumber(itm.unitPrice),
+                                    fontSize = 10.sp,
+                                    modifier = Modifier.weight(1.1f),
                                     textAlign = TextAlign.End
                                 )
                                 Text(
-                                    text = NumberFormatUtils.formatPrice(itm.totalPrice),
+                                    text = NumberFormatUtils.formatPriceOnlyNumber(itm.totalPrice),
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 11.sp,
-                                    modifier = Modifier.weight(1.5f),
+                                    modifier = Modifier.weight(1.3f),
                                     textAlign = TextAlign.End
                                 )
                             }
